@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1180" role="img" aria-labelledby="title desc">
+  <title id="title">A photo together from two places</title>
+  <desc id="desc">Two illustrated people smile from their own little portrait frames.</desc>
+  <defs>
+    <linearGradient id="paper" x2="0" y2="1"><stop stop-color="#e6ece8"/><stop offset="1" stop-color="#c9d7d1"/></linearGradient>
+    <linearGradient id="windowA" x2="0" y2="1"><stop stop-color="#f4d7bd"/><stop offset="1" stop-color="#e9a98d"/></linearGradient>
+    <linearGradient id="windowB" x2="0" y2="1"><stop stop-color="#c4e0db"/><stop offset="1" stop-color="#92bbb4"/></linearGradient>
+  </defs>
+  <rect width="900" height="1180" fill="url(#paper)"/>
+  <circle cx="749" cy="175" r="106" fill="#f8efdb" opacity=".85"/>
+  <path d="M0 795c145-73 227-35 344 5 151 51 317-49 556-2v382H0z" fill="#afc3bb" opacity=".7"/>
+  <rect x="42" y="52" width="816" height="1076" rx="25" fill="#f9faf6"/>
+  <text x="82" y="112" fill="#536367" font-family="Arial,sans-serif" font-size="19" font-weight="700" letter-spacing="3">A LITTLE BOOTH FOR TWO</text>
+  <circle cx="807" cy="103" r="8" fill="#a83d30"/>
+  <rect x="76" y="150" width="364" height="770" rx="177" fill="url(#windowA)"/>
+  <rect x="460" y="150" width="364" height="770" rx="177" fill="url(#windowB)"/>
+  <path d="M97 648c60-87 128-118 191-95 60-35 116 5 131 94v218H97z" fill="#8b4e48"/>
+  <path d="M484 647c68-82 127-111 184-92 53-32 106 5 135 92v219H484z" fill="#335f60"/>
+  <ellipse cx="260" cy="494" rx="112" ry="145" fill="#c98261"/>
+  <path d="M147 490c-14-115 44-205 127-205 97 0 142 87 116 213-24-37-48-64-75-80-42 32-96 53-168 57z" fill="#382b2c"/>
+  <path d="M225 503c12 10 24 10 36 0m37 0c12 10 24 10 36 0" fill="none" stroke="#382b2c" stroke-width="8" stroke-linecap="round"/>
+  <path d="M244 560c13 19 35 28 56 0" fill="none" stroke="#8e403c" stroke-width="8" stroke-linecap="round"/>
+  <ellipse cx="644" cy="490" rx="111" ry="145" fill="#8d5947"/>
+  <path d="M531 470c-3-111 48-186 123-186 81 0 129 73 113 185-34-25-54-52-70-81-49 39-103 67-166 82z" fill="#2d2829"/>
+  <path d="M606 503c11 9 22 9 33 0m40 0c11 9 22 9 33 0" fill="none" stroke="#292526" stroke-width="8" stroke-linecap="round"/>
+  <path d="M619 559c15 18 38 27 59 0" fill="none" stroke="#713d39" stroke-width="8" stroke-linecap="round"/>
+  <text x="258" y="972" text-anchor="middle" fill="#536367" font-family="Arial,sans-serif" font-size="18" font-weight="700" letter-spacing="2">YOUR SIDE</text>
+  <text x="642" y="972" text-anchor="middle" fill="#536367" font-family="Arial,sans-serif" font-size="18" font-weight="700" letter-spacing="2">THEIR SIDE</text>
+  <path d="M392 1020h116" stroke="#d4dede" stroke-width="2"/>
+  <text x="450" y="1072" text-anchor="middle" fill="#a83d30" font-family="Georgia,serif" font-size="29" font-style="italic">same little moment</text>
+</svg>
