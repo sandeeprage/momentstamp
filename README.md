@@ -1,47 +1,55 @@
 # Momentstamp
 
-A small photo booth for two people in different places. The host approves a guest, both participants capture portraits at the same time, and each browser creates and downloads the shared strip locally.
+A private browser photobooth for two people in different places. The host can have up to six people waiting, then admit one guest into the booth. Both participants take portraits together and create the same downloadable photo strip in their own browsers.
+
+## Features
+
+- No account; the host shares an expiring invite link and approves guest requests.
+- A waiting list for up to six guests; one guest can be in the booth with the host at a time.
+- Live camera previews, soft warm / black-and-white / natural filters, and a mirror option.
+- Synchronized countdown and peer-to-peer photo exchange. Images are composed and downloaded locally; Momentstamp does not store photo files.
+- No voice chat. The product is intended for people aged 16 and older, with self-confirmation at entry.
 
 ## Run locally
 
-Requires Node.js 20 or newer. Install dependencies once, then start Wrangler:
+Requires Node.js 20 or newer.
 
 ```sh
-npm install
+npm ci
 npm run dev
 ```
 
-Open the local URL printed by Wrangler. Use a secure origin (localhost or HTTPS) for camera access. Wrangler runs the Worker and simulates the per-room SQLite Durable Objects locally.
+Open the local HTTPS or localhost URL printed by Wrangler. Browsers require a secure context for camera access. Wrangler runs the Worker and simulates SQLite-backed Durable Objects locally.
 
-## Deploy to Cloudflare Workers
+## Deploy to Cloudflare
 
 ```sh
 npm run deploy
 ```
 
-The first deployment creates the Worker, serves `public/` as static assets, and applies the SQLite Durable Object migration. Wrangler will ask you to choose an account if needed. No separate database or image bucket is required.
+The Worker serves the files in `public/` and coordinates rooms using one SQLite-backed Durable Object per booth. Room data expires after six hours or 90 minutes without activity. Wrangler may ask you to select your Cloudflare account.
 
-For restrictive NATs and firewalls, create a Cloudflare Realtime TURN key and configure these Worker secrets:
+### Configure TURN
+
+TURN helps browsers connect when a network blocks a direct WebRTC path. In the Cloudflare dashboard, open **Realtime → TURN Server** and create a TURN key. Keep its generated key ID and key secret private. From this project folder, add them to the Worker:
 
 ```sh
 npx wrangler secret put CF_TURN_KEY_ID
 npx wrangler secret put CF_TURN_API_TOKEN
 ```
 
-The API token should have only the Calls permission needed to generate TURN credentials. The Worker generates short-lived credentials for admitted participants; the long-lived key and token remain server-side. TURN relays encrypted WebRTC traffic and may incur usage charges; direct peer connections continue to use STUN when TURN is not configured.
+Enter the TURN key ID for `CF_TURN_KEY_ID` and the TURN key secret for `CF_TURN_API_TOKEN`. The latter is the TURN key secret, not your general Cloudflare account API token. Wrangler deploys the Worker when each secret is added. Without TURN, direct STUN connections may still work, but restrictive networks can fail to connect. See [Cloudflare’s credential guide](https://developers.cloudflare.com/realtime/turn/generate-credentials/) and [TURN pricing](https://developers.cloudflare.com/realtime/turn/faq/).
 
-## Product behavior and privacy
+## Project notes
 
-- No accounts; invite links are bearer credentials and the host can approve up to six people in the waiting list. Only one guest can be admitted alongside the host at a time.
-- Room metadata and signaling events live in one SQLite-backed Durable Object per booth and expire after six hours, or 90 minutes idle.
-- Camera video and captured images use peer-to-peer WebRTC. The Worker does not receive or store image bytes, and the strip is composed and downloaded in each browser.
-- There is no voice chat. The app asks for camera access only after a participant chooses to enter a booth.
-- The audience is 16+ with a self-confirmation prompt.
+- [Product requirements and architecture](PRODUCT_REQUIREMENTS.md) describes the shipped system and remaining product decisions.
+- [Contributing](CONTRIBUTING.md) covers local setup and review expectations.
+- [Security reporting](SECURITY.md) explains how to report a vulnerability privately.
+- [Privacy Policy](public/privacy.html) and [Terms of Use](public/terms.html) are served by the app.
 
-The landing page uses three Unsplash-hosted photographs. Replace them with product-selected and licensed photography before launch if consistent brand imagery is needed.
+## Known limitations
 
-## Current limits
-
-- The browser uses HTTP polling for room events and WebRTC for live media and still-image transfer.
-- Without Cloudflare TURN credentials, some restrictive networks may not establish a peer connection. The booth now reports this state instead of silently appearing to connect forever.
-- The age prompt is self-confirmation, not age verification. Public launch still needs abuse controls, a support and incident process, and review of the 16+ safeguards in target markets.
+- The app uses HTTP polling for room events and WebRTC for live previews and photo transfer.
+- Connection success depends on browser and network support. TURN improves connectivity on restrictive networks but does not guarantee every connection.
+- Age confirmation is self-reported, not verified.
+- The home page loads sample photos from Unsplash.
