@@ -46,6 +46,10 @@ function renderShell(content, mode = '') {
   app.innerHTML = `<div class="site-shell">${siteHeader()}<main class="page ${mode}">${content}</main></div>`;
 }
 
+function ageConsentMarkup(id) {
+  return `<div class="age-confirm"><input id="${id}" name="age-confirm" type="checkbox"><label for="${id}">I confirm I’m 16 or older and agree to the</label><a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a><span>and</span><a href="/terms.html" target="_blank" rel="noopener">Terms</a><span>.</span></div>`;
+}
+
 function renderHome() {
   state.screen = 'home';
   const isGuestInvite = Boolean(inviteInUrl && roomInUrl && hostSession?.roomId !== roomInUrl && !(savedSession?.roomId === roomInUrl && savedSession?.invite === inviteInUrl));
@@ -67,12 +71,12 @@ function renderHome() {
 function renderGuestEntry() {
   state.screen = 'home';
   renderShell(`<section class="entry-panel"><a class="back-link" href="/">← Back</a><div class="entry-heading"><span class="eyebrow">You have an invite</span><h1>Almost in.</h1><p>The host will let you into the booth. Add a name and request a spot in the waiting room.</p></div>
-    <form id="guest-form" class="entry-form"><label for="guest-name">Your name</label><input class="text-input" id="guest-name" name="name" maxlength="32" autocomplete="nickname" placeholder="What should they call you?"><label class="age-confirm"><input id="guest-age" name="age-confirm" type="checkbox"><span>I confirm I’m 16 or older.</span></label><p class="form-error" id="guest-error" aria-live="polite"></p><button class="button button-primary" type="submit">Request to join <span aria-hidden="true">↗</span></button><div class="privacy-note"><span class="privacy-icon" aria-hidden="true">◉</span><span>Your still photos go directly to the other person. Momentstamp does not store them.</span></div></form>
+    <form id="guest-form" class="entry-form"><label for="guest-name">Your name</label><input class="text-input" id="guest-name" name="name" maxlength="32" autocomplete="nickname" placeholder="What should they call you?">${ageConsentMarkup('guest-age')}<p class="form-error" id="guest-error" aria-live="polite"></p><button class="button button-primary" type="submit">Request to join <span aria-hidden="true">↗</span></button><div class="privacy-note"><span class="privacy-icon" aria-hidden="true">◉</span><span>Your still photos go directly to the other person. Momentstamp does not store them.</span></div></form>
   </section>`, 'product-page');
 }
 
 function openCreateDialog() {
-  app.insertAdjacentHTML('beforeend', `<div class="dialog-backdrop"><section class="setup-dialog" role="dialog" aria-modal="true" aria-labelledby="setup-heading"><button class="dialog-x" type="button" data-action="dismiss-dialog" aria-label="Close">×</button><span class="eyebrow">Before you begin</span><h2 id="setup-heading">Set up your booth</h2><p>Your name helps your person know it’s you. Camera access starts after you create the room.</p><form id="create-form"><label for="host-name">Your name</label><input class="text-input" id="host-name" name="name" maxlength="32" autocomplete="nickname" placeholder="What should they call you?"><label class="age-confirm"><input id="host-age" name="age-confirm" type="checkbox"><span>I confirm I’m 16 or older.</span></label><p class="form-error" id="host-error" aria-live="polite"></p><div class="dialog-actions"><button class="button button-quiet" type="button" data-action="dismiss-dialog">Cancel</button><button class="button button-primary" type="submit">Create your booth</button></div></form></section></div>`);
+  app.insertAdjacentHTML('beforeend', `<div class="dialog-backdrop"><section class="setup-dialog" role="dialog" aria-modal="true" aria-labelledby="setup-heading"><button class="dialog-x" type="button" data-action="dismiss-dialog" aria-label="Close">×</button><span class="eyebrow">Before you begin</span><h2 id="setup-heading">Set up your booth</h2><p>Your name helps your person know it’s you. Camera access starts after you create the room.</p><form id="create-form"><label for="host-name">Your name</label><input class="text-input" id="host-name" name="name" maxlength="32" autocomplete="nickname" placeholder="What should they call you?">${ageConsentMarkup('host-age')}<p class="form-error" id="host-error" aria-live="polite"></p><div class="dialog-actions"><button class="button button-quiet" type="button" data-action="dismiss-dialog">Cancel</button><button class="button button-primary" type="submit">Create your booth</button></div></form></section></div>`);
   document.querySelector('#host-name')?.focus();
 }
 

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f1f4f4">
+    <meta name="color-scheme" content="light dark">
+    <meta name="description" content="How Momentstamp handles room details, connection data, and photos.">
+    <title>Privacy Policy | Momentstamp</title>
+    <link rel="stylesheet" href="/styles.css?v=20261008-2">
+  </head>
+  <body>
+    <header class="site-shell site-header">
+      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">m</span><span>momentstamp</span></a>
+      <span class="header-note">A photo booth for two, wherever you are</span>
+    </header>
+    <main class="site-shell legal-page">
+      <a class="back-link" href="/">← Back to Momentstamp</a>
+      <span class="eyebrow">The details</span>
+      <h1>Privacy Policy</h1>
+      <p class="legal-updated">Effective October 8, 2026</p>
+      <article class="legal-content">
+        <h2>What Momentstamp does</h2>
+        <p>Momentstamp lets two people join a private photo booth using an invite link. No account is required. This policy describes information handled by the app and the services that run it.</p>
+
+        <h2>Information the app handles</h2>
+        <ul>
+          <li><strong>Room details:</strong> the names you enter, room and participant identifiers, the invite token’s hash, each person’s role and status, and actions such as joining, approval, removal, or leaving.</li>
+          <li><strong>Connection signaling:</strong> WebRTC offers, answers, ICE candidates, and booth settings/readiness events are sent through Momentstamp so the browsers can find and connect to each other. Signaling can contain technical network information.</li>
+          <li><strong>Service diagnostics:</strong> Cloudflare hosts the app and may process request details such as IP address, browser information, timestamps, and operational logs or traces to deliver and troubleshoot the service. See <a href="https://www.cloudflare.com/policies/privacy/" target="_blank" rel="noopener">Cloudflare’s Privacy Policy</a>.</li>
+          <li><strong>Landing page images:</strong> the home page loads sample photographs from Unsplash. Your browser connects to Unsplash to retrieve those images; see <a href="https://unsplash.com/privacy" target="_blank" rel="noopener">Unsplash’s Privacy Policy</a>.</li>
+        </ul>
+
+        <h2>Camera and photos</h2>
+        <p>The app asks for camera access when you choose to create or join a booth. Camera video and captured portraits are exchanged between the two browsers using encrypted WebRTC. Momentstamp does not receive or store the photo bytes; each browser composes the strip locally, and you choose whether to download it. A network relay may carry encrypted connection traffic when needed. The other participant may save or capture what they receive, so only share photos with someone you trust.</p>
+
+        <h2>Retention and your browser</h2>
+        <p>Room details and signaling events are kept in the room’s Cloudflare Durable Object for up to six hours, or removed after 90 minutes without activity. The browser keeps room credentials in session storage for the tab session; using “Finish” or leaving through the app clears them. Downloaded photos are under your control.</p>
+
+        <h2>Age</h2>
+        <p>Momentstamp is for people aged 16 and older. The checkbox is a self-confirmation; the app does not verify age. People under 16 should not use the service.</p>
+
+        <h2>Contact and updates</h2>
+        <p>For questions or privacy requests, use the <a href="https://github.com/sandeeprage/momentstamp/issues" target="_blank" rel="noopener">Momentstamp project on GitHub</a>. Do not include private or sensitive information in a public issue. We may update this policy and will change the effective date when we do.</p>
+      </article>
+      <nav class="legal-links" aria-label="Other legal information">
+        <a href="/terms.html">Terms of Use</a>
+        <a href="/">Back to the booth</a>
+      </nav>
+    </main>
+  </body>
+</html>
