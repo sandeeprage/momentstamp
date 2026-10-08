@@ -148,7 +148,7 @@ function updateConnectionState(value = null) {
   element.textContent = label;
   element.classList.toggle('is-connected', channelOpen || peerState === 'connected');
   const button = document.querySelector('[data-action="ready"]');
-  if (button) button.disabled = !connected;
+  if (button) button.disabled = !channelOpen;
   const message = document.querySelector('#ready-message');
   if (message) message.textContent = readyMessage();
 }
@@ -207,7 +207,10 @@ async function pollEvents() {
     state.pendingGuest = snapshot.pending;
     if (snapshot.peers?.length) { state.peerId = snapshot.peers[0].id; state.peerName = snapshot.peers[0].name; }
     updatePendingRequest();
-    for (const event of snapshot.events || []) { state.eventsAfter = Math.max(state.eventsAfter, event.id); await handleRoomEvent(event); }
+    for (const event of snapshot.events || []) {
+      await handleRoomEvent(event);
+      state.eventsAfter = Math.max(state.eventsAfter, event.id);
+    }
     if (snapshot.status === 'closed') { leaveLocal(); renderHome(); return; }
   } catch (error) {
     if (/expired|admitted|does not exist/i.test(error.message)) { toast(error.message); leaveLocal(); renderHome(); return; }
