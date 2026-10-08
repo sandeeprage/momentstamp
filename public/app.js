@@ -65,9 +65,9 @@ function renderHome() {
       <form class="invite-form is-hidden" id="invite-form"><label for="invite-url">Paste your invite link</label><div class="form-row"><input class="text-input" id="invite-url" name="invite-url" type="url" placeholder="https://…" autocomplete="url"><button class="button button-primary" type="submit">Open invite</button></div></form>
     </div>
     <div class="hero-gallery" role="group" aria-label="Sample photos from the Momentstamp booth">
-      <figure class="gallery-photo gallery-photo-main"><img src="https://images.unsplash.com/photo-1758525224341-ba76f560f5cb?auto=format&amp;fit=crop&amp;crop=faces&amp;w=1000&amp;h=1200&amp;q=85" width="900" height="1180" alt="Two friends smiling together as they take a selfie" fetchpriority="high"></figure>
-      <figure class="gallery-photo gallery-photo-top"><img src="https://images.unsplash.com/photo-1742402372285-da4752ec3533?auto=format&amp;fit=crop&amp;crop=faces&amp;w=650&amp;h=760&amp;q=85" width="650" height="760" alt="" loading="lazy"></figure>
-      <figure class="gallery-photo gallery-photo-bottom"><img src="https://images.unsplash.com/photo-1734434570358-21badf4ba1c6?auto=format&amp;fit=crop&amp;crop=faces&amp;w=650&amp;h=760&amp;q=85" width="650" height="760" alt="" loading="lazy"></figure>
+      <figure class="gallery-photo gallery-photo-main"><img src="/images/couple-strip.jpg" width="736" height="1104" alt="A couple holding their photo booth strips" fetchpriority="high"></figure>
+      <figure class="gallery-photo gallery-photo-top"><img src="/images/vintage-booth.jpg" width="736" height="1104" alt="A vintage photo booth" loading="lazy"></figure>
+      <figure class="gallery-photo gallery-photo-bottom"><img src="/images/polaroid-wall.jpg" width="736" height="1104" alt="A wall covered with photo booth prints" loading="lazy"></figure>
     </div>
   </section>`, 'home-page');
 }
