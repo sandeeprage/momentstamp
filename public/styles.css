@@ -81,8 +81,8 @@ a { color: inherit; }
 .lobby-camera { min-height: 420px; background: var(--stage); }
 .camera-view { position: relative; width: 100%; height: 100%; min-height: 260px; overflow: hidden; background: var(--stage); }
 .camera-view video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.camera-view[data-filter="warm"] video { filter: sepia(.17) saturate(1.12); }
-.camera-view[data-filter="mono"] video { filter: grayscale(1); }
+.camera-view[data-filter-style="warm"] video { filter: sepia(.17) saturate(1.12); }
+.camera-view[data-filter-style="mono"] video { filter: grayscale(1); }
 .camera-view[data-mirrored="true"] video { transform: scaleX(-1); }
 .camera-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; color: var(--stage-muted); text-align: center; padding: 20px; }
 .camera-placeholder p { margin: 0; font-size: 13px; }
@@ -111,10 +111,15 @@ a { color: inherit; }
 .booth-heading h1 em { color: var(--accent); font-weight: 500; }
 .connection-state { padding: 8px 12px; color: var(--muted); border: 1px solid var(--line); border-radius: var(--button-radius); font-size: 11px; }
 .connection-state.is-connected { color: #21684d; border-color: #74a78e; }
-.booth-stage { position: relative; height: min(58vw, 570px); min-height: 360px; overflow: hidden; border-radius: var(--panel-radius); background: var(--stage); }
-.remote-view { position: absolute; inset: 0; }
-.self-view { position: absolute; z-index: 2; right: 18px; top: 18px; width: clamp(112px, 19%, 190px); height: clamp(140px, 24%, 235px); min-height: 0; border: 2px solid rgb(255 255 255 / 78%); border-radius: 11px; box-shadow: 0 8px 30px rgb(0 0 0 / 24%); }
+.booth-stage { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; aspect-ratio: 8 / 3; overflow: hidden; border-radius: var(--panel-radius); background: var(--stage); }
+.booth-stage .camera-view { min-width: 0; min-height: 0; aspect-ratio: 4 / 3; border-radius: 10px; }
+.booth-stage .camera-view video { object-fit: cover; }
+.booth-stage .camera-label { left: 11px; bottom: 10px; }
 .stage-hint { position: absolute; z-index: 3; left: 50%; bottom: 18px; max-width: calc(100% - 30px); transform: translateX(-50%); padding: 9px 15px; border-radius: var(--button-radius); color: white; background: rgb(15 23 24 / 65%); font-size: 12px; text-align: center; }
+.people-panel { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; padding: 15px 19px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.people-panel-copy p { margin: 7px 0 0; color: var(--muted); font-size: 13px; }
+.people-panel-copy p strong { color: var(--ink); }
+.people-panel .button { min-height: 38px; padding: 0 15px; font-size: 12px; }
 .booth-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 17px; border: 1px solid var(--line); border-radius: var(--panel-radius); overflow: hidden; background: var(--line); }
 .tool-group, .capture-tools { min-width: 0; padding: 20px; background: var(--surface); }
 .choice-row { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 11px; }
@@ -161,7 +166,7 @@ a { color: inherit; }
   .lobby-layout { grid-template-columns: 1fr; }
   .lobby-camera { min-height: 360px; }
   .lobby-details { min-height: 340px; }
-  .booth-stage { height: 58vw; min-height: 340px; }
+  .booth-stage { aspect-ratio: 8 / 3; }
 }
 @media (max-width: 560px) {
   .site-shell { width: calc(100% - 32px); }
@@ -187,8 +192,12 @@ a { color: inherit; }
   .invite-share > span { padding: 5px 6px; }
   .booth-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
   .booth-heading h1 { font-size: 37px; }
-  .booth-stage { height: 78vw; min-height: 330px; max-height: 470px; }
-  .self-view { top: 11px; right: 11px; width: 104px; height: 134px; }
+  .booth-stage { aspect-ratio: 8 / 3; gap: 5px; }
+  .booth-stage .camera-view { border-radius: 7px; }
+  .booth-stage .camera-label { left: 6px; bottom: 6px; max-width: calc(100% - 12px); padding: 5px 7px; font-size: 9px; }
+  .stage-hint { bottom: 8px; padding: 6px 9px; font-size: 10px; }
+  .people-panel { align-items: flex-start; flex-direction: column; padding: 13px; }
+  .people-panel .button { align-self: stretch; }
   .booth-tools { grid-template-columns: 1fr; }
   .tool-group, .capture-tools { padding: 16px; }
   .capture-tools { grid-column: auto; }

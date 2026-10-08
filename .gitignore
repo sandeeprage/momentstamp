@@ -1,5 +1,8 @@
 node_modules/
 .env
 .env.*
+.dev.vars*
 .DS_Store
 Thumbs.db
+.wrangler/
+dist/

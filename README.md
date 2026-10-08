@@ -1,32 +1,47 @@
 # Momentstamp
 
-A dependency-free browser photobooth MVP for two people in different places. A host creates a private booth, approves a guest from a waiting room, and the pair takes synchronized photos together to receive a shared photo strip.
+A small photo booth for two people in different places. The host approves a guest, both participants capture portraits at the same time, and each browser creates and downloads the shared strip locally.
 
 ## Run locally
 
-Requires Node.js 20 or newer. From this directory, run:
+Requires Node.js 20 or newer. Install dependencies once, then start Wrangler:
 
 ```sh
-npm start
+npm install
+npm run dev
 ```
 
-Then open [http://localhost:3000](http://localhost:3000). Camera access works on localhost. For a second device, deploy behind HTTPS; browsers block camera access on ordinary non-local HTTP origins.
+Open the local URL printed by Wrangler. Use a secure origin (localhost or HTTPS) for camera access. Wrangler runs the Worker and simulates the per-room SQLite Durable Objects locally.
 
-## MVP flow
+## Deploy to Cloudflare Workers
 
-1. Create a booth and copy the private invite link.
-2. The guest requests entry; the host admits or rejects them.
-3. Both grant camera access, choose a filter/frame, and get ready.
-4. The host starts a synchronized countdown once both participants are ready.
-5. Still images travel over a WebRTC data channel and each browser composes and downloads the same strip locally.
+```sh
+npm run deploy
+```
 
-Images are not posted to the application API or saved by the server. A simple 16+ self-confirmation is shown before entering. Voice chat is not implemented.
+The first deployment creates the Worker, serves `public/` as static assets, and applies the SQLite Durable Object migration. Wrangler will ask you to choose an account if needed. No separate database or image bucket is required.
 
-The landing page uses original local SVG artwork, so the hero does not depend on a third-party image service.
+For restrictive NATs and firewalls, create a Cloudflare Realtime TURN key and configure these Worker secrets:
 
-## Current implementation limits
+```sh
+npx wrangler secret put CF_TURN_KEY_ID
+npx wrangler secret put CF_TURN_API_TOKEN
+```
 
-- Room state is held in process memory and is lost when the Node process restarts. Run one server instance only; this is a prototype, not a production deployment.
-- WebRTC uses public STUN for direct connections. No TURN relay is configured yet, so some restrictive mobile or corporate networks will fail to connect.
-- Local still capture is one synchronized portrait per person. It does not yet have a multi-shot sequence, account system, persistent gallery, age verification, or production abuse controls.
-- To make the app available to other devices, deploy the Node server over HTTPS and configure TURN credentials, rate limits, persistent/managed room coordination, and monitoring first.
+The API token should have only the Calls permission needed to generate TURN credentials. The Worker generates short-lived credentials for admitted participants; the long-lived key and token remain server-side. TURN relays encrypted WebRTC traffic and may incur usage charges; direct peer connections continue to use STUN when TURN is not configured.
+
+## Product behavior and privacy
+
+- No accounts; invite links are bearer credentials and the host approves the waiting guest.
+- Room metadata and signaling events live in one SQLite-backed Durable Object per booth and expire after six hours, or 90 minutes idle.
+- Camera video and captured images use peer-to-peer WebRTC. The Worker does not receive or store image bytes, and the strip is composed and downloaded in each browser.
+- There is no voice chat. The app asks for camera access only after a participant chooses to enter a booth.
+- The audience is 16+ with a self-confirmation prompt.
+
+The landing page uses three Unsplash-hosted photographs. Replace them with product-selected and licensed photography before launch if consistent brand imagery is needed.
+
+## Current limits
+
+- The browser uses HTTP polling for room events and WebRTC for live media and still-image transfer.
+- Without Cloudflare TURN credentials, some restrictive networks may not establish a peer connection. The booth now reports this state instead of silently appearing to connect forever.
+- The age prompt is self-confirmation, not age verification. Public launch still needs abuse controls, a support and incident process, and review of the 16+ safeguards in target markets.

@@ -10,7 +10,8 @@ const state = {
   screen: 'home', name: '', roomId: null, invite: null, participantId: null, role: null,
   stream: null, remoteStream: null, peer: null, peerId: null, peerName: 'Your person',
   channel: null, candidates: [], offerStarted: false, eventsAfter: 0, pendingGuest: null,
-  filter: 'warm', frame: 'classic', mirror: false, localReady: false, remoteReady: false,
+  turnAvailable: false, iceFailureNotified: false,
+  filter: 'warm', mirror: false, localReady: false, remoteReady: false,
   ownPhoto: null, otherPhoto: null, photoParts: null, strip: null,
   pollTimer: null, captureTimer: null, toastTimer: null,
 };
@@ -56,9 +57,9 @@ function renderHome() {
       <form class="invite-form is-hidden" id="invite-form"><label for="invite-url">Paste your invite link</label><div class="form-row"><input class="text-input" id="invite-url" name="invite-url" type="url" placeholder="https://…" autocomplete="url"><button class="button button-primary" type="submit">Open invite</button></div></form>
     </div>
     <div class="hero-gallery" role="group" aria-label="Sample photos from the Momentstamp booth">
-      <figure class="gallery-photo gallery-photo-main"><img src="/hero-together.svg" width="900" height="1180" alt="Two people sharing a moment from separate places" fetchpriority="high"></figure>
-      <figure class="gallery-photo gallery-photo-top"><img src="/portrait-one.svg" width="650" height="760" alt="" loading="lazy"></figure>
-      <figure class="gallery-photo gallery-photo-bottom"><img src="/portrait-two.svg" width="650" height="760" alt="" loading="lazy"></figure>
+      <figure class="gallery-photo gallery-photo-main"><img src="https://images.unsplash.com/photo-1758525224341-ba76f560f5cb?auto=format&amp;fit=crop&amp;crop=faces&amp;w=1000&amp;h=1200&amp;q=85" width="900" height="1180" alt="Two friends smiling together as they take a selfie" fetchpriority="high"></figure>
+      <figure class="gallery-photo gallery-photo-top"><img src="https://images.unsplash.com/photo-1742402372285-da4752ec3533?auto=format&amp;fit=crop&amp;crop=faces&amp;w=650&amp;h=760&amp;q=85" width="650" height="760" alt="" loading="lazy"></figure>
+      <figure class="gallery-photo gallery-photo-bottom"><img src="https://images.unsplash.com/photo-1734434570358-21badf4ba1c6?auto=format&amp;fit=crop&amp;crop=faces&amp;w=650&amp;h=760&amp;q=85" width="650" height="760" alt="" loading="lazy"></figure>
     </div>
   </section>`, 'home-page');
 }
@@ -76,7 +77,7 @@ function openCreateDialog() {
 }
 
 function cameraView({ id, label, placeholder = 'Camera preview', remote = false, className = '', controls = false }) {
-  const settings = controls ? `data-filter="${state.filter}" data-mirrored="${state.mirror}"` : '';
+  const settings = controls ? `data-filter-style="${state.filter}" data-mirrored="${state.mirror}"` : '';
   return `<div class="camera-view ${className}" ${settings}><video id="${id}" autoplay playsinline ${remote ? '' : 'muted'}></video><div class="camera-placeholder" id="${id}-placeholder"><span class="camera-glyph" aria-hidden="true">◉</span><p>${escapeHtml(placeholder)}</p></div><span class="camera-label">${escapeHtml(label)}</span></div>`;
 }
 
@@ -98,9 +99,9 @@ function pendingMarkup() {
 function renderBooth() {
   state.screen = 'booth';
   renderShell(`<section class="booth-page"><header class="booth-heading"><div><span class="eyebrow">Your little booth</span><h1>You and <em>${escapeHtml(state.peerName)}</em></h1></div><span class="connection-state" id="connection-state">Connecting</span></header>
-    <div class="booth-stage">${cameraView({ id: 'remote-video', label: state.peerName, placeholder: 'Connecting to your person…', remote: true, className: 'remote-view', controls: true })}${cameraView({ id: 'local-video', label: 'You', placeholder: 'Your preview', className: 'self-view', controls: true })}<div class="stage-hint" id="stage-hint">Find your light, then choose a frame below.</div></div>
+    <div class="booth-stage">${cameraView({ id: 'local-video', label: `You · ${state.name}`, placeholder: 'Your preview', className: 'self-view', controls: true })}${cameraView({ id: 'remote-video', label: state.peerName, placeholder: 'Connecting to your person…', remote: true, className: 'remote-view', controls: true })}<div class="stage-hint" id="stage-hint">You’re side by side. Choose a filter below.</div></div>
+    ${state.role === 'host' ? `<section class="people-panel"><div class="people-panel-copy"><span class="section-label">PEOPLE IN THIS BOOTH</span><p><strong>${escapeHtml(state.name || 'You')}</strong><span aria-hidden="true"> · </span>${escapeHtml(state.peerName)}</p></div><button class="button button-quiet" data-action="remove-guest">Remove guest</button></section>` : ''}
     <div class="booth-tools"><section class="tool-group"><span class="section-label">FILTER</span><div class="choice-row"><button class="choice ${state.filter === 'warm' ? 'is-selected' : ''}" data-filter="warm">Soft warm</button><button class="choice ${state.filter === 'mono' ? 'is-selected' : ''}" data-filter="mono">Black &amp; white</button><button class="choice ${state.filter === 'original' ? 'is-selected' : ''}" data-filter="original">Natural</button></div></section>
-      <section class="tool-group"><span class="section-label">FRAME</span><div class="choice-row"><button class="choice ${state.frame === 'classic' ? 'is-selected' : ''}" data-frame="classic">Sunday</button><button class="choice ${state.frame === 'film' ? 'is-selected' : ''}" data-frame="film">Film edge</button></div></section>
       <section class="tool-group"><span class="section-label">MIRROR</span><div class="choice-row"><button class="choice ${!state.mirror ? 'is-selected' : ''}" data-mirror="false">Natural</button><button class="choice ${state.mirror ? 'is-selected' : ''}" data-mirror="true">Mirrored</button></div></section>
       <section class="capture-tools"><p id="ready-message">${readyMessage()}</p><span class="countdown" id="countdown" aria-live="polite"></span><div class="capture-actions"><button class="button button-primary ready-button" data-action="ready" ${state.channel?.readyState !== 'open' ? 'disabled' : ''}>${state.localReady ? 'You’re ready ✓' : 'I’m ready'}</button><button class="button button-quiet" data-action="leave">Leave booth</button></div></section>
     </div><p class="privacy-line">Your photos travel directly between browsers. They are never uploaded or stored by Momentstamp.</p></section>`, 'product-page');
@@ -140,9 +141,12 @@ function attachVideo(id, stream) {
 function updateConnectionState(value = null) {
   const element = document.querySelector('#connection-state');
   if (!element) return;
-  const connected = state.channel?.readyState === 'open';
-  element.textContent = value || (connected ? 'Together' : 'Connecting');
-  element.classList.toggle('is-connected', connected);
+  const channelOpen = state.channel?.readyState === 'open';
+  const peerState = state.peer?.connectionState;
+  const iceState = state.peer?.iceConnectionState;
+  const label = value || (channelOpen ? 'Together' : peerState === 'connected' ? 'Connected' : iceState === 'checking' ? 'Finding a route' : iceState === 'failed' ? 'Can’t connect' : iceState === 'disconnected' ? 'Reconnecting' : 'Connecting');
+  element.textContent = label;
+  element.classList.toggle('is-connected', channelOpen || peerState === 'connected');
   const button = document.querySelector('[data-action="ready"]');
   if (button) button.disabled = !connected;
   const message = document.querySelector('#ready-message');
@@ -228,23 +232,46 @@ async function handleRoomEvent(event) {
   }
   if (event.event === 'peer-ready' && state.role === 'guest') { state.peerId = event.data.id; await setupPeer(); }
   if (event.event === 'rejected') { toast('The host can’t let you in right now.'); leaveLocal(); renderHome(); }
+  if (event.event === 'removed' && state.role === 'guest') { toast('The host removed you from the booth.'); leaveLocal(); renderHome(); }
   if (event.event === 'closed') { toast('The host closed this booth.'); leaveLocal(); renderHome(); }
+  if (event.event === 'guest-left' && state.role === 'host') {
+    resetPeerConnection();
+    if (state.screen === 'booth') { toast(event.data.removed ? 'Guest removed. Your booth is ready for another invite.' : 'Your person left the booth.'); renderLobby(); }
+  }
   if (event.event === 'signal') await handleSignal(event.data);
 }
 
 async function setupPeer(makeOffer = false) {
   if (state.peer) { if (makeOffer) await startOffer(); return; }
-  state.peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  let iceServers = [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }];
+  try {
+    const config = await request(boothPath('ice-servers'));
+    if (Array.isArray(config.iceServers) && config.iceServers.length) iceServers = config.iceServers;
+    state.turnAvailable = Boolean(config.turnAvailable);
+  } catch {
+    // Keep direct STUN connectivity for local/legacy development servers.
+  }
+  const peer = new RTCPeerConnection({ iceServers });
+  state.peer = peer;
   state.remoteStream = new MediaStream();
-  for (const track of state.stream.getTracks()) state.peer.addTrack(track, state.stream);
-  state.peer.ontrack = event => {
+  for (const track of state.stream.getTracks()) peer.addTrack(track, state.stream);
+  peer.ontrack = event => {
     for (const track of event.streams[0].getTracks()) state.remoteStream.addTrack(track);
     attachVideo('remote-video', state.remoteStream);
   };
-  state.peer.onicecandidate = event => { if (event.candidate) sendSignal('ice', event.candidate.toJSON()); };
-  state.peer.onconnectionstatechange = () => updateConnectionState(state.peer.connectionState === 'connected' ? 'Connected' : 'Reconnecting');
-  if (state.role === 'host') bindPhotoChannel(state.peer.createDataChannel('momentstamp-photos', { ordered: true }));
-  else state.peer.ondatachannel = event => bindPhotoChannel(event.channel);
+  peer.onicecandidate = event => { if (event.candidate) sendSignal('ice', event.candidate.toJSON()); };
+  peer.onconnectionstatechange = () => updateConnectionState();
+  peer.oniceconnectionstatechange = () => {
+    updateConnectionState();
+    if (peer.iceConnectionState === 'failed' && !state.iceFailureNotified) {
+      state.iceFailureNotified = true;
+      toast(state.turnAvailable
+        ? 'The network connection failed. Try reconnecting or switching networks.'
+        : 'These networks could not connect directly. Cloudflare TURN relay is not configured for this deployment yet.');
+    }
+  };
+  if (state.role === 'host') bindPhotoChannel(peer.createDataChannel('momentstamp-photos', { ordered: true }));
+  else peer.ondatachannel = event => bindPhotoChannel(event.channel);
   if (makeOffer) await startOffer();
 }
 
@@ -305,13 +332,16 @@ function updateReady() {
 function changeAppearance(key, rawValue) {
   const value = key === 'mirror' ? rawValue === 'true' : rawValue;
   state[key] = value; state.localReady = false; state.remoteReady = false;
-  const selector = key === 'filter' ? '[data-filter]' : key === 'frame' ? '[data-frame]' : '[data-mirror]';
-  document.querySelectorAll(selector).forEach(button => button.classList.toggle('is-selected', button.dataset[key] === String(rawValue)));
-  document.querySelectorAll('.camera-view[data-filter]').forEach(camera => {
-    camera.dataset.filter = state.filter;
+  const selector = key === 'filter' ? '[data-filter]' : '[data-mirror]';
+  document.querySelectorAll(selector).forEach(button => {
+    const selected = button.dataset[key] === String(rawValue);
+    button.classList.toggle('is-selected', selected);
+  });
+  document.querySelectorAll('.camera-view[data-filter-style]').forEach(camera => {
+    camera.dataset.filterStyle = state.filter;
     camera.dataset.mirrored = String(state.mirror);
   });
-  sendSignal('settings', { filter: state.filter, frame: state.frame, mirror: state.mirror }); sendSignal('unready', {}); updateReady();
+  sendSignal('settings', { filter: state.filter, mirror: state.mirror }); sendSignal('unready', {}); updateReady();
 }
 
 async function toggleReady() {
@@ -366,13 +396,34 @@ function composeStrip(local, remote) {
   const canvas = document.createElement('canvas'); canvas.width = 850; canvas.height = 1830;
   const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fbfcfc'; ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.textAlign = 'center'; ctx.fillStyle = '#28383c'; ctx.font = '500 25px monospace'; ctx.fillText('A MOMENT, MADE TOGETHER', 425, 62);
-  const crop = (image, y) => { const size = Math.min(image.width, image.height), x = (image.width - size) / 2, top = (image.height - size) / 2; ctx.drawImage(image, x, top, size, size, 62, y, 726, 726); };
-  crop(state.role === 'host' ? local : remote, 92); crop(state.role === 'host' ? remote : local, 842);
-  ctx.strokeStyle = state.frame === 'film' ? '#29373a' : '#bc4d3d'; ctx.lineWidth = state.frame === 'film' ? 18 : 7;
-  ctx.strokeRect(57, 87, 736, 736); ctx.strokeRect(57, 837, 736, 736);
+  const photos = [{ image: state.role === 'host' ? local : remote, y: 92 }, { image: state.role === 'host' ? remote : local, y: 842 }];
+  photos.forEach(({ image, y }) => {
+    const size = Math.min(image.width, image.height);
+    ctx.drawImage(image, (image.width - size) / 2, (image.height - size) / 2, size, size, 62, y, 726, 726);
+  });
   ctx.fillStyle = '#27373a'; ctx.font = 'italic 37px Georgia'; ctx.fillText('even from here', 425, 1665);
   ctx.fillStyle = '#637174'; ctx.font = '15px monospace'; ctx.fillText('TWO PLACES, ONE LITTLE MOMENT', 425, 1712);
   state.strip = canvas.toDataURL('image/jpeg', .91); showCurrentScreen('result');
+}
+
+function resetPeerConnection() {
+  clearTimeout(state.captureTimer);
+  state.peer?.close();
+  state.peer = state.channel = state.remoteStream = null;
+  state.peerId = null; state.peerName = 'Your person'; state.offerStarted = false; state.candidates = [];
+  state.turnAvailable = false; state.iceFailureNotified = false;
+  state.ownPhoto = state.otherPhoto = state.strip = state.photoParts = null;
+  state.localReady = state.remoteReady = false;
+}
+
+async function removeGuest() {
+  if (state.role !== 'host' || !state.peerId) return;
+  try {
+    await request(boothPath('remove'), 'POST', { participantId: state.peerId });
+    resetPeerConnection();
+    renderLobby();
+    toast('Guest removed. Your booth is ready for another invite.');
+  } catch (error) { toast(error.message); }
 }
 
 async function hostDecision(action) {
@@ -402,15 +453,15 @@ function leaveLocal(clearStored = true) {
   state.peer = state.channel = state.stream = state.remoteStream = null;
   state.ownPhoto = state.otherPhoto = state.strip = state.photoParts = null;
   state.roomId = state.invite = state.participantId = state.role = state.peerId = null;
+  state.turnAvailable = false; state.iceFailureNotified = false;
   if (clearStored) { sessionStorage.removeItem('momentstamp-host'); sessionStorage.removeItem('momentstamp-session'); }
 }
 
 app.addEventListener('click', async event => {
   if (event.target.classList.contains('dialog-backdrop')) { document.querySelector('.dialog-backdrop')?.remove(); return; }
-  const target = event.target.closest('[data-action], [data-filter], [data-frame], [data-mirror]');
+  const target = event.target.closest('[data-action], [data-filter], [data-mirror]');
   if (!target) return;
   if (target.dataset.filter) return changeAppearance('filter', target.dataset.filter);
-  if (target.dataset.frame) return changeAppearance('frame', target.dataset.frame);
   if (target.dataset.mirror !== undefined) return changeAppearance('mirror', target.dataset.mirror);
   const action = target.dataset.action;
   try {
@@ -420,6 +471,7 @@ app.addEventListener('click', async event => {
     else if (action === 'copy-invite') { await navigator.clipboard.writeText(`${location.origin}/?room=${state.roomId}&invite=${state.invite}`); toast('Invite copied. Send it to your person.'); }
     else if (action === 'admit') await hostDecision('admit');
     else if (action === 'reject') await hostDecision('reject');
+    else if (action === 'remove-guest') await removeGuest();
     else if (action === 'ready') await toggleReady();
     else if (action === 'leave') await closeBooth();
     else if (action === 'download') { const link = document.createElement('a'); link.href = state.strip; link.download = `momentstamp-${new Date().toISOString().slice(0, 10)}.jpg`; link.click(); }
