@@ -1,3 +1,5 @@
+import { stripLayouts, paperColors, defaultStripStyle, sanitizeStripStyle, renderStrip } from './strip.js?v=20261009-1';
+
 const app = document.querySelector('#app');
 const toastNode = document.querySelector('#toast');
 const query = new URLSearchParams(location.search);
@@ -13,6 +15,8 @@ const state = {
   turnAvailable: false, iceFailureNotified: false,
   filter: 'warm', mirror: false, localReady: false, remoteReady: false,
   ownPhoto: null, otherPhoto: null, photoParts: null, strip: null,
+  stripStyle: defaultStripStyle(), stripPhotos: null, stripCanvas: null, captureAt: null,
+  styleTimer: null, exportFormat: 'jpeg', captureStarting: false,
   pollTimer: null, captureTimer: null, toastTimer: null,
 };
 
@@ -125,9 +129,58 @@ function readyMessage() {
 
 function renderResult() {
   state.screen = 'result';
-  renderShell(`<section class="result-page"><span class="eyebrow">A little thing to keep</span><h1>Look at you two.</h1><p>Your shared photo strip is ready. Download it while you’re here.</p><img class="photo-strip" id="photo-strip" alt="Your shared photo strip"><div class="result-actions"><button class="button button-primary" data-action="download">Download strip</button><button class="button button-quiet" data-action="retake">Take another</button></div><button class="text-action finish-action" data-action="finish">Finish and clear this session</button><p class="privacy-line">The strip lives on your device. Momentstamp does not save it.</p></section>`, 'product-page');
+  const style = state.stripStyle;
+  renderShell(`<section class="result-page"><header class="result-heading"><span class="eyebrow">A little thing to keep</span><h1>Make it yours.</h1><p>Your two portraits, your kind of keepsake.</p></header>
+    <div class="result-workspace"><div class="strip-preview"><img class="photo-strip" id="photo-strip" alt="Your shared photo strip"><p id="strip-size"></p></div>
+    <div class="strip-editor"><h2>Your strip</h2><p class="strip-share-status" id="strip-share-status" role="status"></p>
+      <fieldset class="strip-controls" ${state.role !== 'host' ? 'disabled' : ''}><legend class="sr-only">Customize your shared strip</legend>
+        <div class="strip-field"><span class="section-label" id="layout-label">Layout</span><div class="layout-options" role="group" aria-labelledby="layout-label">${stripLayouts.map(layout => `<button type="button" class="layout-option ${style.layout === layout.id ? 'is-selected' : ''}" data-strip-layout="${layout.id}" aria-pressed="${style.layout === layout.id}"><span class="layout-sketch layout-sketch-${layout.id}" aria-hidden="true"><i></i><i></i></span><span>${layout.label}</span></button>`).join('')}</div></div>
+        <div class="strip-field"><span class="section-label" id="paper-label">Paper color</span><div class="paper-options" role="group" aria-labelledby="paper-label">${paperColors.map(paper => `<button type="button" class="paper-option" data-strip-color="${paper.color}" aria-label="${paper.label}" aria-pressed="${style.color === paper.color}"><span class="paper-swatch" data-paper="${paper.id}" aria-hidden="true"></span><span>${paper.label}</span></button>`).join('')}<label class="custom-paper">Custom<input type="color" id="strip-color" value="${style.color}" aria-label="Custom paper color"></label></div></div>
+        <div class="strip-field"><label class="section-label" for="strip-caption">Caption</label><input class="text-input" id="strip-caption" maxlength="48" value="${escapeHtml(style.caption)}" placeholder="A few words to remember" aria-describedby="caption-help"><small id="caption-help">Up to 48 characters. Leave blank for just the photos.</small></div>
+        <div class="strip-field-row"><div class="strip-field"><label class="section-label" for="strip-font">Lettering</label><select class="text-input" id="strip-font">${[['serif', 'Classic'], ['sans', 'Simple'], ['mono', 'Typewriter']].map(([value, label]) => `<option value="${value}" ${style.font === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
+        <div class="strip-field"><label class="section-label" for="strip-spacing">Spacing</label><select class="text-input" id="strip-spacing">${[['compact', 'Compact'], ['regular', 'Balanced'], ['wide', 'Airy']].map(([value, label]) => `<option value="${value}" ${style.spacing === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div>
+        <div class="strip-toggles"><label><input type="checkbox" id="strip-rounded" ${style.rounded ? 'checked' : ''}>Rounded photos</label><label><input type="checkbox" id="strip-date" ${style.showDate ? 'checked' : ''}>Show capture date (UTC)</label></div>
+        <button class="text-action" type="button" data-action="reset-strip">Reset design</button>
+      </fieldset>
+      <div class="strip-export"><label for="strip-format">Download as</label><select class="text-input" id="strip-format"><option value="jpeg" ${state.exportFormat === 'jpeg' ? 'selected' : ''}>JPG · smaller file</option><option value="png" ${state.exportFormat === 'png' ? 'selected' : ''}>PNG · lossless</option></select><div class="result-actions"><button class="button button-primary" data-action="download">Download strip</button><button class="button button-quiet" data-action="retake">Take another</button></div></div>
+    </div></div><button class="text-action finish-action" data-action="finish">Finish and clear this session</button><p class="privacy-line">The strip lives on your device. Momentstamp does not save it.</p></section>`, 'product-page');
+  updateStripPreview(); updateStripShareStatus();
+}
+
+function updateStripPreview() {
   const image = document.querySelector('#photo-strip');
-  if (image) image.src = state.strip;
+  if (image) { image.src = state.strip; image.dataset.layout = state.stripStyle.layout; }
+  const size = document.querySelector('#strip-size');
+  if (size && state.stripCanvas) size.textContent = `${state.stripCanvas.width} × ${state.stripCanvas.height} px`;
+}
+
+function updateStripShareStatus() {
+  const label = document.querySelector('#strip-share-status');
+  if (label) label.textContent = state.channel?.readyState !== 'open'
+    ? 'Connection closed. You can still download; new edits stay on this device.'
+    : state.role === 'host' ? 'You style it. Both of you see the changes.' : 'Your host is styling the strip. Your preview updates here.';
+}
+
+function shareStripStyle() {
+  clearTimeout(state.styleTimer);
+  if (state.role === 'host' && state.channel?.readyState === 'open') {
+    try { state.channel.send(JSON.stringify({ type: 'strip-style', style: state.stripStyle })); }
+    catch { toast('Your design could not be shared. Try again when connected.'); }
+  }
+}
+
+function changeStripStyle(patch, reset = false) {
+  if (state.role !== 'host') return;
+  state.stripStyle = sanitizeStripStyle({ ...state.stripStyle, ...patch });
+  if (state.stripPhotos) composeStrip(...state.stripPhotos);
+  if (reset) renderResult();
+  document.querySelectorAll('[data-strip-layout]').forEach(button => {
+    const selected = button.dataset.stripLayout === state.stripStyle.layout;
+    button.classList.toggle('is-selected', selected); button.setAttribute('aria-pressed', String(selected));
+  });
+  document.querySelectorAll('[data-strip-color]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.stripColor === state.stripStyle.color)));
+  const color = document.querySelector('#strip-color'); if (color) color.value = state.stripStyle.color;
+  clearTimeout(state.styleTimer); state.styleTimer = setTimeout(shareStripStyle, 150);
 }
 
 function showCurrentScreen(screen) {
@@ -290,18 +343,22 @@ async function setupPeer(makeOffer = false) {
 
 function bindPhotoChannel(channel) {
   state.channel = channel;
-  channel.onopen = () => { updateConnectionState(); if (state.screen === 'booth') renderBooth(); };
-  channel.onclose = () => updateConnectionState('Disconnected');
+  channel.onopen = () => { updateConnectionState(); if (state.screen === 'booth') renderBooth(); shareStripStyle(); updateStripShareStatus(); };
+  channel.onclose = () => { updateConnectionState('Disconnected'); updateStripShareStatus(); };
   channel.onerror = () => toast('Photo connection interrupted. Try again.');
   channel.onmessage = event => {
     try {
       const message = JSON.parse(event.data);
+      if (message.type === 'strip-style' && state.role === 'guest') {
+        state.stripStyle = sanitizeStripStyle(message.style, state.stripStyle);
+        if (state.stripPhotos) { composeStrip(...state.stripPhotos); renderResult(); }
+      }
       if (message.type === 'photo-start') state.photoParts = { total: message.total, chunks: new Array(message.total), count: 0 };
       if (message.type === 'photo-chunk' && state.photoParts && message.total === state.photoParts.total) {
         if (state.photoParts.chunks[message.index] === undefined) { state.photoParts.chunks[message.index] = message.data; state.photoParts.count += 1; }
         if (state.photoParts.count === state.photoParts.total) { state.otherPhoto = state.photoParts.chunks.join(''); state.photoParts = null; tryCompose(); }
       }
-      if (message.type === 'retake') { state.ownPhoto = state.otherPhoto = state.strip = null; state.localReady = state.remoteReady = false; if (state.screen === 'result') showCurrentScreen('booth'); updateConnectionState(); }
+      if (message.type === 'retake') { clearStripCapture(); state.localReady = state.remoteReady = false; if (state.screen === 'result') showCurrentScreen('booth'); updateConnectionState(); }
     } catch { toast('Could not read that photo. Try taking the moment again.'); }
   };
 }
@@ -329,9 +386,13 @@ async function handleSignal(signal) {
     for (const candidate of state.candidates.splice(0)) await state.peer.addIceCandidate(candidate);
   } else if (signal.kind === 'ice' && state.peer) {
     if (state.peer.remoteDescription) await state.peer.addIceCandidate(signal.payload); else state.candidates.push(signal.payload);
-  } else if (signal.kind === 'ready') { state.remoteReady = true; updateReady(); }
+  } else if (signal.kind === 'ready') { state.remoteReady = true; updateReady(); await startCaptureWhenReady(); }
   else if (signal.kind === 'unready') { state.remoteReady = false; updateReady(); }
-  else if (signal.kind === 'settings') { Object.assign(state, signal.payload); if (state.screen === 'booth') renderBooth(); }
+  else if (signal.kind === 'settings') {
+    if (['warm', 'mono', 'original'].includes(signal.payload?.filter)) state.filter = signal.payload.filter;
+    if (typeof signal.payload?.mirror === 'boolean') state.mirror = signal.payload.mirror;
+    if (state.screen === 'booth') renderBooth();
+  }
   else if (signal.kind === 'capture-at') scheduleCapture(signal.payload.at);
   else if (signal.kind === 'capture-cancel') { clearTimeout(state.captureTimer); state.localReady = false; updateReady(); }
 }
@@ -360,13 +421,20 @@ function changeAppearance(key, rawValue) {
 async function toggleReady() {
   state.localReady = !state.localReady;
   await sendSignal(state.localReady ? 'ready' : 'unready', {}); updateReady();
-  if (state.localReady && state.remoteReady && state.role === 'host') {
+  await startCaptureWhenReady();
+}
+
+async function startCaptureWhenReady() {
+  if (state.localReady && state.remoteReady && state.role === 'host' && !state.captureStarting) {
+    state.captureStarting = true;
     const captureAt = Date.now() + 3200;
-    await sendSignal('capture-at', { at: captureAt }); scheduleCapture(captureAt);
+    try { await sendSignal('capture-at', { at: captureAt }); if (state.peer) scheduleCapture(captureAt); }
+    finally { state.captureStarting = false; }
   }
 }
 
 function scheduleCapture(at) {
+  state.captureAt = at;
   clearTimeout(state.captureTimer); state.localReady = state.remoteReady = false; updateReady();
   const label = document.querySelector('#countdown');
   const tick = () => {
@@ -400,23 +468,26 @@ function capturePhoto() {
 
 function tryCompose() {
   if (!state.ownPhoto || !state.otherPhoto) return;
+  const own = state.ownPhoto, other = state.otherPhoto;
   const local = new Image(), remote = new Image(); let ready = 0;
-  const onload = () => { if (++ready === 2) composeStrip(local, remote); };
-  local.onload = remote.onload = onload; local.src = state.ownPhoto; remote.src = state.otherPhoto;
+  const onload = () => {
+    if (++ready === 2 && state.ownPhoto === own && state.otherPhoto === other) {
+      state.stripPhotos = [local, remote]; composeStrip(local, remote);
+    }
+  };
+  local.onerror = remote.onerror = () => toast('Could not prepare this strip. Please take another photo.');
+  local.onload = remote.onload = onload; local.src = own; remote.src = other;
 }
 
 function composeStrip(local, remote) {
-  const canvas = document.createElement('canvas'); canvas.width = 850; canvas.height = 1830;
-  const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fbfcfc'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.textAlign = 'center'; ctx.fillStyle = '#28383c'; ctx.font = '500 25px monospace'; ctx.fillText('A MOMENT, MADE TOGETHER', 425, 62);
-  const photos = [{ image: state.role === 'host' ? local : remote, y: 92 }, { image: state.role === 'host' ? remote : local, y: 842 }];
-  photos.forEach(({ image, y }) => {
-    const size = Math.min(image.width, image.height);
-    ctx.drawImage(image, (image.width - size) / 2, (image.height - size) / 2, size, size, 62, y, 726, 726);
-  });
-  ctx.fillStyle = '#27373a'; ctx.font = 'italic 37px Georgia'; ctx.fillText('even from here', 425, 1665);
-  ctx.fillStyle = '#637174'; ctx.font = '15px monospace'; ctx.fillText('TWO PLACES, ONE LITTLE MOMENT', 425, 1712);
-  state.strip = canvas.toDataURL('image/jpeg', .91); showCurrentScreen('result');
+  const photos = state.role === 'host' ? [local, remote] : [remote, local];
+  state.stripCanvas = renderStrip(document.createElement('canvas'), photos, state.stripStyle, state.captureAt);
+  state.strip = state.stripCanvas.toDataURL('image/jpeg', .91);
+  if (state.screen === 'result') updateStripPreview(); else showCurrentScreen('result');
+}
+
+function clearStripCapture() {
+  state.ownPhoto = state.otherPhoto = state.strip = state.photoParts = state.stripPhotos = state.stripCanvas = state.captureAt = null;
 }
 
 function resetPeerConnection() {
@@ -425,7 +496,7 @@ function resetPeerConnection() {
   state.peer = state.channel = state.remoteStream = null;
   state.peerId = null; state.peerName = 'Your person'; state.offerStarted = false; state.candidates = [];
   state.turnAvailable = false; state.iceFailureNotified = false;
-  state.ownPhoto = state.otherPhoto = state.strip = state.photoParts = null;
+  clearStripCapture();
   state.localReady = state.remoteReady = false;
 }
 
@@ -461,10 +532,11 @@ async function closeBooth() {
 }
 
 function leaveLocal(clearStored = true) {
+  clearTimeout(state.styleTimer); state.stripStyle = defaultStripStyle();
   clearTimeout(state.pollTimer); clearTimeout(state.captureTimer); state.peer?.close();
   state.stream?.getTracks().forEach(track => track.stop());
   state.peer = state.channel = state.stream = state.remoteStream = null;
-  state.ownPhoto = state.otherPhoto = state.strip = state.photoParts = null;
+  clearStripCapture();
   state.roomId = state.invite = state.participantId = state.role = state.peerId = null;
   state.turnAvailable = false; state.iceFailureNotified = false;
   if (clearStored) { sessionStorage.removeItem('momentstamp-host'); sessionStorage.removeItem('momentstamp-session'); }
@@ -472,8 +544,10 @@ function leaveLocal(clearStored = true) {
 
 app.addEventListener('click', async event => {
   if (event.target.classList.contains('dialog-backdrop')) { document.querySelector('.dialog-backdrop')?.remove(); return; }
-  const target = event.target.closest('[data-action], [data-filter], [data-mirror]');
+  const target = event.target.closest('[data-action], [data-filter], [data-mirror], [data-strip-layout], [data-strip-color]');
   if (!target) return;
+  if (target.dataset.stripLayout) return changeStripStyle({ layout: target.dataset.stripLayout });
+  if (target.dataset.stripColor) return changeStripStyle({ color: target.dataset.stripColor });
   if (target.dataset.filter) return changeAppearance('filter', target.dataset.filter);
   if (target.dataset.mirror !== undefined) return changeAppearance('mirror', target.dataset.mirror);
   const action = target.dataset.action;
@@ -487,10 +561,29 @@ app.addEventListener('click', async event => {
     else if (action === 'remove-guest') await removeGuest();
     else if (action === 'ready') await toggleReady();
     else if (action === 'leave') await closeBooth();
-    else if (action === 'download') { const link = document.createElement('a'); link.href = state.strip; link.download = `momentstamp-${new Date().toISOString().slice(0, 10)}.jpg`; link.click(); }
-    else if (action === 'retake') { state.ownPhoto = state.otherPhoto = state.strip = null; state.localReady = state.remoteReady = false; if (state.channel?.readyState === 'open') state.channel.send(JSON.stringify({ type: 'retake' })); showCurrentScreen('booth'); }
+    else if (action === 'reset-strip') changeStripStyle(defaultStripStyle(), true);
+    else if (action === 'download' && state.stripCanvas) {
+      shareStripStyle();
+      const link = document.createElement('a'); link.href = state.stripCanvas.toDataURL(`image/${state.exportFormat}`, .94);
+      link.download = `momentstamp-${state.stripStyle.layout}-${new Date(state.captureAt || Date.now()).toISOString().slice(0, 10)}.${state.exportFormat === 'png' ? 'png' : 'jpg'}`; link.click();
+    }
+    else if (action === 'retake') { shareStripStyle(); clearStripCapture(); state.localReady = state.remoteReady = false; if (state.channel?.readyState === 'open') state.channel.send(JSON.stringify({ type: 'retake' })); showCurrentScreen('booth'); }
     else if (action === 'finish') await closeBooth();
   } catch (error) { toast(error.message || 'Please try that again.'); }
+});
+
+app.addEventListener('input', event => {
+  if (event.target.id === 'strip-caption') changeStripStyle({ caption: event.target.value });
+  if (event.target.id === 'strip-color') changeStripStyle({ color: event.target.value });
+});
+
+app.addEventListener('change', event => {
+  const target = event.target;
+  if (target.id === 'strip-font') changeStripStyle({ font: target.value });
+  if (target.id === 'strip-spacing') changeStripStyle({ spacing: target.value });
+  if (target.id === 'strip-rounded') changeStripStyle({ rounded: target.checked });
+  if (target.id === 'strip-date') changeStripStyle({ showDate: target.checked });
+  if (target.id === 'strip-format' && ['jpeg', 'png'].includes(target.value)) state.exportFormat = target.value;
 });
 
 app.addEventListener('submit', async event => {

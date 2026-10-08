@@ -7,6 +7,7 @@ A private browser photobooth for two people in different places. The host can ha
 - No account; the host shares an expiring invite link and approves guest requests.
 - A waiting list for up to six guests; one guest can be in the booth with the host at a time.
 - Live camera previews, soft warm / black-and-white / natural filters, and a mirror option.
+- Three strip layouts with paper colors, captions, lettering, spacing, rounded photos, and an optional date. The host styles the result and both people see the changes; either can download JPG or PNG.
 - Synchronized countdown and peer-to-peer photo exchange. Images are composed and downloaded locally; Momentstamp does not store photo files.
 - No voice chat. The product is intended for people aged 16 and older, with self-confirmation at entry.
 
