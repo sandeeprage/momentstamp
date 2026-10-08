@@ -7,9 +7,6 @@ const inviteInUrl = query.get('invite');
 const roomInUrl = query.get('room');
 const hostSession = readSession('momentstamp-host');
 const savedSession = readSession('momentstamp-session');
-let pinterestGallery = null;
-let pinterestScriptAdded = false;
-
 const state = {
   screen: 'home', name: '', roomId: null, invite: null, participantId: null, role: null,
   stream: null, remoteStream: null, peer: null, peerId: null, peerName: 'Your person',
@@ -61,28 +58,17 @@ function renderHome() {
   const isGuestInvite = Boolean(inviteInUrl && roomInUrl && hostSession?.roomId !== roomInUrl && !(savedSession?.roomId === roomInUrl && savedSession?.invite === inviteInUrl));
   if (isGuestInvite) return renderGuestEntry();
 
-  const galleryMarkup = `<div class="hero-gallery" role="group" aria-label="Photobooth inspiration from Pinterest">
-      <figure class="gallery-photo gallery-photo-main"><a href="https://www.pinterest.com/pin/819936675945206837/" data-pin-do="embedPin" data-pin-width="large" target="_blank" rel="noopener noreferrer" aria-label="Couple photo booth inspiration on Pinterest"><img src="/images/couple-strip.jpg" width="736" height="1104" alt="A couple holding their photo booth strips" fetchpriority="high"></a></figure>
-      <figure class="gallery-photo gallery-photo-top"><a href="https://www.pinterest.com/pin/1196337375941659/" data-pin-do="embedPin" data-pin-width="large" target="_blank" rel="noopener noreferrer" aria-label="Vintage photo booth inspiration on Pinterest"><img src="/images/vintage-booth.jpg" width="736" height="1104" alt="A vintage photo booth" loading="lazy"></a></figure>
-      <figure class="gallery-photo gallery-photo-bottom"><a href="https://www.pinterest.com/pin/1072278992513352977/" data-pin-do="embedPin" data-pin-width="large" target="_blank" rel="noopener noreferrer" aria-label="Photo wall inspiration on Pinterest"><img src="/images/photobooth-pictures.jpg" width="736" height="1104" alt="A wall covered with photo booth picture strips" loading="lazy"></a></figure>
-    </div>`;
   renderShell(`<section class="hero">
     <div class="hero-copy"><span class="eyebrow">A tiny room for two</span><h1>Take a picture together.</h1><p class="hero-description">Your own little photobooth, timed together, even when you’re in different places.</p>
       <div class="hero-actions"><button class="button button-primary" data-action="show-create">Create your booth <span aria-hidden="true">↗</span></button><button class="button button-quiet" data-action="show-join">Join a booth</button></div>
       <form class="invite-form is-hidden" id="invite-form"><label for="invite-url">Paste your invite link</label><div class="form-row"><input class="text-input" id="invite-url" name="invite-url" type="url" placeholder="https://…" autocomplete="url"><button class="button button-primary" type="submit">Open invite</button></div></form>
     </div>
-    ${pinterestGallery ? '<div id="home-gallery-slot"></div>' : galleryMarkup}
+    <div class="hero-gallery" role="group" aria-label="Sample photos from the Momentstamp booth">
+      <figure class="gallery-photo gallery-photo-main"><img src="/images/vintage-booth.jpg" width="736" height="1104" alt="A vintage photo booth" fetchpriority="high"></figure>
+      <figure class="gallery-photo gallery-photo-top"><img src="/images/couple-photo-strips.jpg" width="736" height="1104" alt="A couple holding their photo booth strips" loading="lazy"></figure>
+      <figure class="gallery-photo gallery-photo-bottom"><img src="/images/photo-booth-museum.jpg" width="736" height="1104" alt="Photo booth prints and memorabilia at a museum" loading="lazy"></figure>
+    </div>
   </section>`, 'home-page');
-  if (pinterestGallery) document.querySelector('#home-gallery-slot')?.replaceWith(pinterestGallery);
-  else pinterestGallery = document.querySelector('.hero-gallery');
-  if (!pinterestScriptAdded && pinterestGallery) {
-    pinterestScriptAdded = true;
-    const script = document.createElement('script');
-    script.src = 'https://assets.pinterest.com/js/pinit.js';
-    script.async = true;
-    script.onerror = () => { pinterestScriptAdded = false; };
-    document.head.append(script);
-  }
 }
 
 function renderGuestEntry() {

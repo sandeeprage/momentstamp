@@ -3,7 +3,7 @@
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY
   Permissions-Policy: camera=(self), microphone=()
-  Content-Security-Policy: default-src 'self'; img-src 'self' https://i.pinimg.com https://s.pinimg.com blob: data:; media-src 'self' blob:; style-src 'self'; script-src 'self' https://assets.pinterest.com; connect-src 'self' https://widgets.pinterest.com https://api.pinterest.com; frame-src https://assets.pinterest.com https://widgets.pinterest.com https://www.pinterest.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 
 /index.html
   Cache-Control: no-cache
