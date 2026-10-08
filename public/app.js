@@ -9,7 +9,7 @@ const savedSession = readSession('momentstamp-session');
 const state = {
   screen: 'home', name: '', roomId: null, invite: null, participantId: null, role: null,
   stream: null, remoteStream: null, peer: null, peerId: null, peerName: 'Your person',
-  channel: null, candidates: [], offerStarted: false, eventsAfter: 0, pendingGuest: null,
+  channel: null, candidates: [], offerStarted: false, eventsAfter: 0, pendingGuests: [],
   turnAvailable: false, iceFailureNotified: false,
   filter: 'warm', mirror: false, localReady: false, remoteReady: false,
   ownPhoto: null, otherPhoto: null, photoParts: null, strip: null,
@@ -91,20 +91,22 @@ function renderLobby() {
   const inviteUrl = `${location.origin}/?room=${encodeURIComponent(state.roomId)}&invite=${encodeURIComponent(state.invite)}`;
   renderShell(`<section class="flow-page"><div class="flow-heading"><span class="eyebrow">The waiting room</span><h1>${isHost ? 'Invite your person.' : 'You’re on the list.'}</h1><p>${isHost ? 'Share the private link. You decide who comes in.' : 'Keep this open. The host will let you in when they’re ready.'}</p></div>
     <div class="lobby-layout"><div class="lobby-camera">${cameraView({ id: 'local-video', label: state.name || (isHost ? 'Host' : 'Guest'), placeholder: isHost ? 'Your camera is ready when you are.' : 'Waiting for the host to approve you.' })}</div>
-      <aside class="lobby-details">${isHost ? `<div class="detail-top"><span class="section-label">PRIVATE BOOTH</span><span class="status-tag" id="waiting-status">${state.pendingGuest ? 'REQUEST WAITING' : 'WAITING'}</span></div><h2>Your booth is ready.</h2><p>Only people with your invite link can request to join. You’ll approve them here.</p><div class="invite-share"><span>${escapeHtml(inviteUrl)}</span><button class="button button-primary" data-action="copy-invite">Copy invite</button></div><div id="join-request-area">${pendingMarkup()}</div>` : `<div class="detail-top"><span class="section-label">GUEST REQUEST</span><span class="status-tag">WAITING</span></div><h2>Request sent.</h2><p>As soon as the host approves, you’ll enter the booth together.</p><div class="privacy-note"><span class="privacy-icon" aria-hidden="true">◉</span><span>Photos are exchanged directly between your browsers. They are not saved on the service.</span></div>`}<button class="text-action" data-action="leave">${isHost ? 'Close this booth' : 'Leave waiting room'}</button></aside>
+      <aside class="lobby-details">${isHost ? `<div class="detail-top"><span class="section-label">PRIVATE BOOTH</span><span class="status-tag" id="waiting-status">${state.pendingGuests.length ? `${state.pendingGuests.length} WAITING` : 'WAITING'}</span></div><h2>Your booth is ready.</h2><p>Up to six people can wait here. You choose who gets the single guest spot in your booth.</p><div class="invite-share"><span>${escapeHtml(inviteUrl)}</span><button class="button button-primary" data-action="copy-invite">Copy invite</button></div><div id="join-request-area">${pendingMarkup()}</div>` : `<div class="detail-top"><span class="section-label">GUEST REQUEST</span><span class="status-tag">WAITING</span></div><h2>Request sent.</h2><p>As soon as the host approves, you’ll enter the booth together.</p><div class="privacy-note"><span class="privacy-icon" aria-hidden="true">◉</span><span>Photos are exchanged directly between your browsers. They are not saved on the service.</span></div>`}<button class="text-action" data-action="leave">${isHost ? 'Close this booth' : 'Leave waiting room'}</button></aside>
     </div></section>`, 'product-page');
   attachVideo('local-video', state.stream);
 }
 
 function pendingMarkup() {
-  return state.pendingGuest ? `<div class="join-request"><div><span class="section-label">REQUEST TO JOIN</span><strong>${escapeHtml(state.pendingGuest.name)} is waiting</strong><p>Let them into your private booth?</p></div><div class="request-actions"><button class="button button-primary" data-action="admit">Let them in</button><button class="button button-quiet" data-action="reject">Not now</button></div></div>` : `<div class="empty-wait"><span class="empty-ring" aria-hidden="true"></span><span>Waiting for your person to arrive</span></div>`;
+  if (!state.pendingGuests.length) return state.screen === 'booth' ? '' : `<div class="empty-wait"><span class="empty-ring" aria-hidden="true"></span><span>Waiting for your person to arrive</span></div>`;
+  const occupied = state.screen === 'booth';
+  return `<div class="waiting-list"><div class="waiting-list-heading"><span class="section-label">WAITING LIST</span><span>${state.pendingGuests.length} / 6</span></div>${state.pendingGuests.map(guest => `<div class="join-request"><div><strong>${escapeHtml(guest.name)}</strong><p>${occupied ? 'Waiting for the guest spot to open.' : 'Requesting to join your booth.'}</p></div><div class="request-actions">${occupied ? '' : `<button class="button button-primary" data-action="admit" data-participant-id="${escapeHtml(guest.id)}">Let in</button>`}<button class="button button-quiet" data-action="reject" data-participant-id="${escapeHtml(guest.id)}">Remove</button></div></div>`).join('')}</div>`;
 }
 
 function renderBooth() {
   state.screen = 'booth';
   renderShell(`<section class="booth-page"><header class="booth-heading"><div><span class="eyebrow">Your little booth</span><h1>You and <em>${escapeHtml(state.peerName)}</em></h1></div><span class="connection-state" id="connection-state">Connecting</span></header>
     <div class="booth-stage">${cameraView({ id: 'local-video', label: `You · ${state.name}`, placeholder: 'Your preview', className: 'self-view', controls: true })}${cameraView({ id: 'remote-video', label: state.peerName, placeholder: 'Connecting to your person…', remote: true, className: 'remote-view', controls: true })}<div class="stage-hint" id="stage-hint">You’re side by side. Choose a filter below.</div></div>
-    ${state.role === 'host' ? `<section class="people-panel"><div class="people-panel-copy"><span class="section-label">PEOPLE IN THIS BOOTH</span><p><strong>${escapeHtml(state.name || 'You')}</strong><span aria-hidden="true"> · </span>${escapeHtml(state.peerName)}</p></div><button class="button button-quiet" data-action="remove-guest">Remove guest</button></section>` : ''}
+    ${state.role === 'host' ? `<section class="people-panel"><div class="people-panel-copy"><span class="section-label">PEOPLE IN THIS BOOTH</span><p><strong>${escapeHtml(state.name || 'You')}</strong><span aria-hidden="true"> · </span>${escapeHtml(state.peerName)}</p></div><button class="button button-quiet" data-action="remove-guest">Remove guest</button></section><section class="booth-queue" id="waiting-list-area"></section>` : ''}
     <div class="booth-tools"><section class="tool-group"><span class="section-label">FILTER</span><div class="choice-row"><button class="choice ${state.filter === 'warm' ? 'is-selected' : ''}" data-filter="warm">Soft warm</button><button class="choice ${state.filter === 'mono' ? 'is-selected' : ''}" data-filter="mono">Black &amp; white</button><button class="choice ${state.filter === 'original' ? 'is-selected' : ''}" data-filter="original">Natural</button></div></section>
       <section class="tool-group"><span class="section-label">MIRROR</span><div class="choice-row"><button class="choice ${!state.mirror ? 'is-selected' : ''}" data-mirror="false">Natural</button><button class="choice ${state.mirror ? 'is-selected' : ''}" data-mirror="true">Mirrored</button></div></section>
       <section class="capture-tools"><p id="ready-message">${readyMessage()}</p><span class="countdown" id="countdown" aria-live="polite"></span><div class="capture-actions"><button class="button button-primary ready-button" data-action="ready" ${state.channel?.readyState !== 'open' ? 'disabled' : ''}>${state.localReady ? 'You’re ready ✓' : 'I’m ready'}</button><button class="button button-quiet" data-action="leave">Leave booth</button></div></section>
@@ -178,7 +180,7 @@ async function createBooth(form) {
     state.name = form.elements.name.value.trim() || 'Host';
     await getCamera();
     const result = await request('/api/rooms', 'POST', { name: state.name }, false);
-    Object.assign(state, { roomId: result.roomId, invite: result.invite, participantId: result.participantId, role: 'host', eventsAfter: 0, pendingGuest: null });
+    Object.assign(state, { roomId: result.roomId, invite: result.invite, participantId: result.participantId, role: 'host', eventsAfter: 0, pendingGuests: [] });
     const session = { roomId: result.roomId, invite: result.invite, participantId: result.participantId, role: 'host', name: state.name };
     sessionStorage.setItem('momentstamp-host', JSON.stringify(session));
     sessionStorage.setItem('momentstamp-session', JSON.stringify(session));
@@ -196,7 +198,7 @@ async function requestToJoin(form) {
     state.name = form.elements.name.value.trim() || 'Guest';
     await getCamera();
     const result = await request(`/api/rooms/${encodeURIComponent(roomInUrl)}/request`, 'POST', { name: state.name, invite: inviteInUrl }, false);
-    Object.assign(state, { roomId: roomInUrl, invite: inviteInUrl, participantId: result.participantId, role: 'guest', eventsAfter: 0, pendingGuest: null });
+    Object.assign(state, { roomId: roomInUrl, invite: inviteInUrl, participantId: result.participantId, role: 'guest', eventsAfter: 0, pendingGuests: [] });
     sessionStorage.setItem('momentstamp-session', JSON.stringify({ roomId: roomInUrl, invite: inviteInUrl, participantId: result.participantId, role: 'guest', name: state.name }));
     history.replaceState({}, '', `/?room=${encodeURIComponent(roomInUrl)}&invite=${encodeURIComponent(inviteInUrl)}`);
     showCurrentScreen('lobby'); startPolling();
@@ -208,7 +210,7 @@ async function pollEvents() {
   if (!state.participantId || !state.roomId) return;
   try {
     const snapshot = await request(`${boothPath('events')}?after=${state.eventsAfter}`);
-    state.pendingGuest = snapshot.pending;
+    if (state.role === 'host') state.pendingGuests = Array.isArray(snapshot.pending) ? snapshot.pending : [];
     if (snapshot.peers?.length) { state.peerId = snapshot.peers[0].id; state.peerName = snapshot.peers[0].name; }
     updatePendingRequest();
     for (const event of snapshot.events || []) {
@@ -224,16 +226,19 @@ async function pollEvents() {
 
 function updatePendingRequest() {
   const area = document.querySelector('#join-request-area');
-  if (!area) return;
-  area.innerHTML = pendingMarkup();
+  if (area) area.innerHTML = pendingMarkup();
+  const boothArea = document.querySelector('#waiting-list-area');
+  if (boothArea) boothArea.innerHTML = pendingMarkup();
   const status = document.querySelector('#waiting-status');
-  if (status) status.textContent = state.pendingGuest ? 'REQUEST WAITING' : 'WAITING';
+  if (status) status.textContent = state.pendingGuests.length ? `${state.pendingGuests.length} WAITING` : 'WAITING';
 }
 
 async function handleRoomEvent(event) {
-  if (event.event === 'join-request' && state.role === 'host') { state.pendingGuest = event.data; updatePendingRequest(); }
+  if (event.event === 'join-request' && state.role === 'host') { if (!state.pendingGuests.some(guest => guest.id === event.data.id)) state.pendingGuests.push(event.data); updatePendingRequest(); }
   if (event.event === 'admitted' && state.role === 'host') {
+    state.pendingGuests = state.pendingGuests.filter(guest => guest.id !== event.data.id);
     state.peerId = event.data.id; state.peerName = event.data.name; showCurrentScreen('booth'); await setupPeer(true);
+    updatePendingRequest();
   } else if (event.event === 'admitted' && state.role === 'guest') {
     toast('You’re in. Connecting now.'); showCurrentScreen('booth'); await setupPeer();
   }
@@ -241,6 +246,7 @@ async function handleRoomEvent(event) {
   if (event.event === 'rejected') { toast('The host can’t let you in right now.'); leaveLocal(); renderHome(); }
   if (event.event === 'removed' && state.role === 'guest') { toast('The host removed you from the booth.'); leaveLocal(); renderHome(); }
   if (event.event === 'closed') { toast('The host closed this booth.'); leaveLocal(); renderHome(); }
+  if (event.event === 'request-left' && state.role === 'host') { state.pendingGuests = state.pendingGuests.filter(guest => guest.id !== event.data.id); updatePendingRequest(); }
   if (event.event === 'guest-left' && state.role === 'host') {
     resetPeerConnection();
     if (state.screen === 'booth') { toast(event.data.removed ? 'Guest removed. Your booth is ready for another invite.' : 'Your person left the booth.'); renderLobby(); }
@@ -433,8 +439,8 @@ async function removeGuest() {
   } catch (error) { toast(error.message); }
 }
 
-async function hostDecision(action) {
-  try { await request(boothPath(action), 'POST', { participantId: state.pendingGuest?.id }); if (action === 'reject') state.pendingGuest = null; updatePendingRequest(); }
+async function hostDecision(action, guestId) {
+  try { await request(boothPath(action), 'POST', { participantId: guestId }); state.pendingGuests = state.pendingGuests.filter(guest => guest.id !== guestId); updatePendingRequest(); }
   catch (error) { toast(error.message); }
 }
 
@@ -476,8 +482,8 @@ app.addEventListener('click', async event => {
     else if (action === 'dismiss-dialog') document.querySelector('.dialog-backdrop')?.remove();
     else if (action === 'show-join') { document.querySelector('#invite-form')?.classList.toggle('is-hidden'); document.querySelector('#invite-url')?.focus(); }
     else if (action === 'copy-invite') { await navigator.clipboard.writeText(`${location.origin}/?room=${state.roomId}&invite=${state.invite}`); toast('Invite copied. Send it to your person.'); }
-    else if (action === 'admit') await hostDecision('admit');
-    else if (action === 'reject') await hostDecision('reject');
+    else if (action === 'admit') await hostDecision('admit', target.dataset.participantId);
+    else if (action === 'reject') await hostDecision('reject', target.dataset.participantId);
     else if (action === 'remove-guest') await removeGuest();
     else if (action === 'ready') await toggleReady();
     else if (action === 'leave') await closeBooth();

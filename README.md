@@ -32,7 +32,7 @@ The API token should have only the Calls permission needed to generate TURN cred
 
 ## Product behavior and privacy
 
-- No accounts; invite links are bearer credentials and the host approves the waiting guest.
+- No accounts; invite links are bearer credentials and the host can approve up to six people in the waiting list. Only one guest can be admitted alongside the host at a time.
 - Room metadata and signaling events live in one SQLite-backed Durable Object per booth and expire after six hours, or 90 minutes idle.
 - Camera video and captured images use peer-to-peer WebRTC. The Worker does not receive or store image bytes, and the strip is composed and downloaded in each browser.
 - There is no voice chat. The app asks for camera access only after a participant chooses to enter a booth.

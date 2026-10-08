@@ -3,6 +3,7 @@ import { DurableObject } from 'cloudflare:workers';
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;
 const IDLE_TTL_MS = 90 * 60 * 1000;
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_WAITING_GUESTS = 6;
 const SIGNAL_KINDS = new Set(['offer', 'answer', 'ice', 'ready', 'unready', 'settings', 'capture-at', 'capture-cancel']);
 
 function randomToken(bytes = 24) {
@@ -220,10 +221,9 @@ export class BoothRoom extends DurableObject {
     const expired = await this.expireIfNeeded(row);
     if (expired) return expired;
     if (row.invite_hash !== inviteHash) return { error: 'That invite link is not valid.', status: 403 };
-    const guest = this.sql.exec("SELECT id FROM participants WHERE role = 'guest' AND status = 'admitted'").toArray()[0];
-    const pending = this.sql.exec("SELECT id FROM participants WHERE role = 'guest' AND status = 'pending'").toArray()[0];
-    if (row.status === 'closed' || guest) return { error: 'This booth is already full or closed.', status: 409 };
-    if (pending) return { error: 'Someone is already waiting for approval.', status: 409 };
+    const pendingCount = this.sql.exec("SELECT COUNT(*) AS count FROM participants WHERE role = 'guest' AND status = 'pending'").one().count;
+    if (row.status === 'closed') return { error: 'This booth is closed.', status: 409 };
+    if (pendingCount >= MAX_WAITING_GUESTS) return { error: 'This waiting list is full. Ask the host to try again later.', status: 409 };
     const guestId = randomToken(18);
     this.ctx.storage.transactionSync(() => {
       this.sql.exec('INSERT INTO participants (id, role, name, status, joined_at) VALUES (?, ?, ?, ?, ?)', guestId, 'guest', name, 'pending', Date.now());
@@ -240,7 +240,8 @@ export class BoothRoom extends DurableObject {
     const me = this.person(participantId);
     if (!me || !['admitted', 'pending', 'denied'].includes(me.status)) return { error: 'You are not admitted to this booth.', status: 403 };
     const host = this.sql.exec("SELECT name FROM participants WHERE role = 'host' LIMIT 1").toArray()[0];
-    const guest = this.sql.exec("SELECT id, name, status FROM participants WHERE role = 'guest' AND status IN ('admitted', 'pending') LIMIT 1").toArray()[0];
+    const guest = this.sql.exec("SELECT id, name, status FROM participants WHERE role = 'guest' AND status = 'admitted' LIMIT 1").toArray()[0];
+    const pending = me.role === 'host' ? this.sql.exec('SELECT id, name FROM participants WHERE role = ? AND status = ? ORDER BY joined_at LIMIT ?', 'guest', 'pending', MAX_WAITING_GUESTS).toArray() : [];
     const peers = this.sql.exec("SELECT id, name, role FROM participants WHERE status = 'admitted' AND id != ?", participantId).toArray();
     const events = this.sql.exec(
       'SELECT id, event, data FROM events WHERE id > ? AND (recipient IS NULL OR recipient = ? OR recipient = ?) ORDER BY id LIMIT 300',
@@ -252,7 +253,7 @@ export class BoothRoom extends DurableObject {
       expiresAt: row.expires_at,
       host: host?.name ?? 'Host',
       guest: guest ? { name: guest.name, admitted: guest.status === 'admitted' } : null,
-      pending: me.role === 'host' && guest?.status === 'pending' ? { id: guest.id, name: guest.name } : null,
+      pending,
       peers,
       events,
     };
@@ -272,6 +273,8 @@ export class BoothRoom extends DurableObject {
     if (denied) return denied;
     const guest = this.person(guestId);
     if (!guest || guest.role !== 'guest' || guest.status !== 'pending') return { error: 'That request is no longer waiting.', status: 409 };
+    const admittedGuest = this.sql.exec("SELECT id FROM participants WHERE role = 'guest' AND status = 'admitted' LIMIT 1").toArray()[0];
+    if (admittedGuest) return { error: 'Remove the current guest before admitting someone from the waiting list.', status: 409 };
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("UPDATE participants SET status = 'admitted' WHERE id = ?", guestId);
       this.sql.exec("UPDATE booth SET status = 'active' WHERE id = 1");
@@ -320,8 +323,12 @@ export class BoothRoom extends DurableObject {
     if (!person || person.role !== 'guest' || !['pending', 'admitted'].includes(person.status)) return { error: 'You are not admitted to this booth.', status: 403 };
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("UPDATE participants SET status = 'left' WHERE id = ?", participantId);
-      this.sql.exec("UPDATE booth SET status = 'waiting' WHERE id = 1 AND status != 'closed'");
-      this.append('guest-left', { name: person.name }, 'host');
+      if (person.status === 'pending') {
+        this.append('request-left', { id: person.id }, 'host');
+      } else {
+        this.sql.exec("UPDATE booth SET status = 'waiting' WHERE id = 1 AND status != 'closed'");
+        this.append('guest-left', { name: person.name }, 'host');
+      }
     });
     await this.touch();
     return { ok: true };
