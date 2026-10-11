@@ -1,4 +1,8 @@
-import { stripLayouts, paperColors, defaultStripStyle, sanitizeStripStyle, renderStrip } from './strip.js?v=20261009-1';
+import { CAPTURE_ROUNDS, paperColors, defaultStripStyle, sanitizeStripStyle, renderStrip } from './strip.js?v=20261011-6';
+
+const CAPTURE_VERSION = 4;
+const ROUND_INTERVAL_MS = 3200;
+const PHOTO_CHUNK_SIZE = 20_000;
 
 const app = document.querySelector('#app');
 const toastNode = document.querySelector('#toast');
@@ -13,9 +17,12 @@ const state = {
   channel: null, candidates: [], offerStarted: false, eventsAfter: 0, pendingGuests: [],
   turnAvailable: false, iceFailureNotified: false,
   filter: 'warm', mirror: false, localReady: false, remoteReady: false,
-  ownPhoto: null, otherPhoto: null, photoParts: null, strip: null,
+  ownPhotos: [], otherPhotos: [], photoParts: new Map(), strip: null,
   stripStyle: defaultStripStyle(), stripPhotos: null, stripCanvas: null, captureAt: null,
   styleTimer: null, exportFormat: 'jpeg', captureStarting: false,
+  captureId: null, captureRunning: false, captureRound: 0, composing: false,
+  captureAbort: null, captureDeadlineTimer: null, sentRounds: new Set(), photoSendQueue: Promise.resolve(),
+  remoteCaptureVersion: null, clockSynced: false, clockOffset: 0, clockSamples: 0, clockBestRtt: Infinity, clockPingAt: null,
   pollTimer: null, captureTimer: null, toastTimer: null,
 };
 
@@ -46,7 +53,7 @@ function siteHeader() {
 }
 
 function renderShell(content, mode = '') {
-  app.innerHTML = `<div class="site-shell">${siteHeader()}<main class="page ${mode}">${content}</main></div>`;
+  app.innerHTML = `<div class="site-shell${mode.includes('booth-mode') ? ' is-booth' : ''}">${siteHeader()}<main class="page ${mode}">${content}</main></div>`;
 }
 
 function ageConsentMarkup(id) {
@@ -83,9 +90,52 @@ function openCreateDialog() {
   document.querySelector('#host-name')?.focus();
 }
 
-function cameraView({ id, label, placeholder = 'Camera preview', remote = false, className = '', controls = false }) {
+function cameraView({ id, label, placeholder = 'Camera preview', className = '', controls = false, showLabel = true }) {
   const settings = controls ? `data-filter-style="${state.filter}" data-mirrored="${state.mirror}"` : '';
-  return `<div class="camera-view ${className}" ${settings}><video id="${id}" autoplay playsinline ${remote ? '' : 'muted'}></video><div class="camera-placeholder" id="${id}-placeholder"><span class="camera-glyph" aria-hidden="true">◉</span><p>${escapeHtml(placeholder)}</p></div><span class="camera-label">${escapeHtml(label)}</span></div>`;
+  return `<div class="camera-view ${className}" ${settings}><video id="${id}" aria-label="${escapeHtml(label)} camera preview" autoplay playsinline muted></video><div class="camera-placeholder" id="${id}-placeholder"><span class="camera-glyph" aria-hidden="true">◉</span><p>${escapeHtml(placeholder)}</p><button type="button" class="button button-quiet is-hidden" data-action="resume-preview">Show camera</button></div>${showLabel ? `<span class="camera-label">${escapeHtml(label)}</span>` : ''}</div>`;
+}
+
+function boothCamera({ remote = false } = {}) {
+  const id = remote ? 'remote-video' : 'local-video';
+  const name = remote ? state.peerName : state.name || 'You';
+  return `<section class="booth-camera" aria-label="${escapeHtml(name)} camera"><header class="camera-card-heading"><div class="camera-person"><strong>${escapeHtml(name)}</strong><span>${remote ? 'Your person' : 'You'}</span></div><span class="camera-status" id="${remote ? 'remote' : 'self'}-camera-status">${remote ? 'Connecting' : 'Starting camera'}</span></header>${cameraView({ id, label: name, placeholder: remote ? 'Connecting to your person…' : 'Starting your camera…', className: remote ? 'remote-view' : 'self-view', controls: true, showLabel: false })}</section>`;
+}
+
+function roundTrayMarkup() {
+  const hostName = state.role === 'host' ? state.name : state.peerName;
+  const guestName = state.role === 'host' ? state.peerName : state.name;
+  return `<section class="rounds-panel" aria-labelledby="rounds-heading"><div class="rounds-heading"><h2 id="rounds-heading">Your four rounds</h2><span id="rounds-progress" role="status">0 of 4 paired</span></div><ol class="round-tray">${Array.from({ length: CAPTURE_ROUNDS }, (_, round) => `<li class="round-tile" data-round="${round}" data-phase="waiting"><div class="round-pair"><div class="round-portrait" data-owner="${state.role === 'host' ? 'self' : 'remote'}"><span class="round-placeholder">${escapeHtml(hostName || 'Host')}</span></div><div class="round-portrait" data-owner="${state.role === 'host' ? 'remote' : 'self'}"><span class="round-placeholder">${escapeHtml(guestName || 'Guest')}</span></div></div><div class="round-caption"><span>Round ${round + 1}</span><span class="round-state">${round === 0 ? 'Up next' : 'Waiting'}</span></div></li>`).join('')}</ol><p class="rounds-note">Each round adds one photo of each of you to the same row.</p></section>`;
+}
+
+function updateRoundTray() {
+  const progress = document.querySelector('#rounds-progress');
+  if (!progress) return;
+  let paired = 0;
+  document.querySelectorAll('.round-tile').forEach(tile => {
+    const round = Number(tile.dataset.round);
+    const complete = Boolean(state.ownPhotos[round] && state.otherPhotos[round] && state.sentRounds.has(round));
+    const arriving = Boolean(state.ownPhotos[round] || state.otherPhotos[round]);
+    const active = state.captureRunning && state.captureRound === round;
+    const phase = complete ? 'complete' : arriving ? 'arriving' : active ? 'active' : 'waiting';
+    tile.dataset.phase = phase;
+    const label = tile.querySelector('.round-state');
+    const copy = complete ? 'Paired' : arriving ? 'Pairing…' : active ? 'Get ready' : !state.captureRunning && round === 0 ? 'Up next' : 'Waiting';
+    if (label.textContent !== copy) label.textContent = copy;
+    if (complete) paired += 1;
+    tile.querySelectorAll('.round-portrait').forEach(portrait => {
+      const local = portrait.dataset.owner === 'self';
+      const photo = (local ? state.ownPhotos : state.otherPhotos)[round];
+      let image = portrait.querySelector('img');
+      if (photo) {
+        if (!image) { image = document.createElement('img'); portrait.append(image); }
+        if (image.getAttribute('src') !== photo) image.src = photo;
+        image.alt = `${local ? state.name || 'You' : state.peerName}, round ${round + 1}`;
+      } else image?.remove();
+      portrait.querySelector('.round-placeholder').classList.toggle('is-hidden', Boolean(photo));
+    });
+  });
+  const copy = `${paired} of ${CAPTURE_ROUNDS} paired`;
+  if (progress.textContent !== copy) progress.textContent = copy;
 }
 
 function renderLobby() {
@@ -108,36 +158,42 @@ function pendingMarkup() {
 function renderBooth() {
   state.screen = 'booth';
   renderShell(`<section class="booth-page"><header class="booth-heading"><div><span class="eyebrow">Your little booth</span><h1>You and <em>${escapeHtml(state.peerName)}</em></h1></div><span class="connection-state" id="connection-state">Connecting</span></header>
-    <div class="booth-stage">${cameraView({ id: 'local-video', label: `You · ${state.name}`, placeholder: 'Your preview', className: 'self-view', controls: true })}${cameraView({ id: 'remote-video', label: state.peerName, placeholder: 'Connecting to your person…', remote: true, className: 'remote-view', controls: true })}<div class="stage-hint" id="stage-hint">You’re side by side. Choose a filter below.</div></div>
+    <p class="booth-description">Get comfortable, choose your look, then get ready together.</p>
+    <div class="booth-stage">${boothCamera()}${boothCamera({ remote: true })}</div>
     ${state.role === 'host' ? `<section class="people-panel"><div class="people-panel-copy"><span class="section-label">PEOPLE IN THIS BOOTH</span><p><strong>${escapeHtml(state.name || 'You')}</strong><span aria-hidden="true"> · </span>${escapeHtml(state.peerName)}</p></div><button class="button button-quiet" data-action="remove-guest">Remove guest</button></section><section class="booth-queue" id="waiting-list-area"></section>` : ''}
     <div class="booth-tools"><section class="tool-group"><span class="section-label">FILTER</span><div class="choice-row"><button class="choice ${state.filter === 'warm' ? 'is-selected' : ''}" data-filter="warm">Soft warm</button><button class="choice ${state.filter === 'mono' ? 'is-selected' : ''}" data-filter="mono">Black &amp; white</button><button class="choice ${state.filter === 'original' ? 'is-selected' : ''}" data-filter="original">Natural</button></div></section>
       <section class="tool-group"><span class="section-label">MIRROR</span><div class="choice-row"><button class="choice ${!state.mirror ? 'is-selected' : ''}" data-mirror="false">Natural</button><button class="choice ${state.mirror ? 'is-selected' : ''}" data-mirror="true">Mirrored</button></div></section>
-      <section class="capture-tools"><p class="capture-instruction">To take a photo, both people press “I’m ready”.</p><p id="ready-message">${readyMessage()}</p><span class="countdown" id="countdown" aria-live="polite"></span><div class="capture-actions"><button class="button button-primary ready-button" data-action="ready" ${state.channel?.readyState !== 'open' ? 'disabled' : ''}>${state.localReady ? 'You’re ready ✓' : 'I’m ready'}</button><button class="button button-quiet" data-action="leave">Leave booth</button></div></section>
-    </div><p class="privacy-line">Your photos travel directly between browsers. They are never uploaded or stored by Momentstamp.</p></section>`, 'product-page');
+      <section class="capture-tools"><div class="capture-copy"><h2>Four rounds. One shared strip.</h2><p class="capture-instruction">Both people press “I’m ready” once. Four countdowns will take your photos together.</p><p id="ready-message" role="status">${readyMessage()}</p><span class="countdown" id="countdown" aria-live="polite"></span></div><div class="capture-actions"><button class="button button-primary ready-button" data-action="ready" aria-pressed="${state.localReady}" ${state.channel?.readyState !== 'open' ? 'disabled' : ''}>${state.localReady ? 'You’re ready' : 'I’m ready'}</button><button class="button button-quiet" data-action="leave">Leave booth</button></div></section>
+    </div>${roundTrayMarkup()}<p class="privacy-line">Your photos travel directly between browsers. They are never uploaded or stored by Momentstamp.</p></section>`, 'product-page booth-mode');
   attachVideo('local-video', state.stream);
   attachVideo('remote-video', state.remoteStream);
   updateConnectionState();
 }
 
 function readyMessage() {
-  if (state.localReady && state.remoteReady) return 'You’re both ready. The host will start the countdown.';
+  if (state.captureRunning) return state.ownPhotos.filter(Boolean).length === CAPTURE_ROUNDS
+    ? 'All four rounds captured. Finishing your shared strip…'
+    : `Photo ${state.captureRound + 1} of ${CAPTURE_ROUNDS}. Change your pose between countdowns.`;
+  if (state.channel?.readyState === 'open' && state.remoteCaptureVersion !== CAPTURE_VERSION) return 'Both people need the latest booth. Refresh both pages to take four rounds.';
+  if (state.channel?.readyState === 'open' && !state.clockSynced) return 'Syncing your cameras for the countdowns…';
+  if (state.localReady && state.remoteReady) return 'You’re both ready. Your four countdowns will begin automatically.';
   if (state.remoteReady) return 'Your person is ready. Your turn!';
   if (state.localReady) return 'You’re ready. Waiting for your person.';
+  if (state.channel?.readyState !== 'open') return 'Connecting your cameras. You can choose your look while you wait.';
   return 'Choose your look, then get into position.';
 }
 
 function renderResult() {
   state.screen = 'result';
   const style = state.stripStyle;
-  renderShell(`<section class="result-page"><header class="result-heading"><span class="eyebrow">A little thing to keep</span><h1>Make it yours.</h1><p>Your two portraits, your kind of keepsake.</p></header>
+  renderShell(`<section class="result-page"><header class="result-heading"><span class="eyebrow">A little thing to keep</span><h1>Make it yours.</h1><p>Four moments, eight portraits, one keepsake.</p></header>
     <div class="result-workspace"><div class="strip-preview"><img class="photo-strip" id="photo-strip" alt="Your shared photo strip"><p id="strip-size"></p></div>
     <div class="strip-editor"><h2>Your strip</h2><p class="strip-share-status" id="strip-share-status" role="status"></p>
       <fieldset class="strip-controls" ${state.role !== 'host' ? 'disabled' : ''}><legend class="sr-only">Customize your shared strip</legend>
-        <div class="strip-field"><span class="section-label" id="layout-label">Layout</span><div class="layout-options" role="group" aria-labelledby="layout-label">${stripLayouts.map(layout => `<button type="button" class="layout-option ${style.layout === layout.id ? 'is-selected' : ''}" data-strip-layout="${layout.id}" aria-pressed="${style.layout === layout.id}"><span class="layout-sketch layout-sketch-${layout.id}" aria-hidden="true"><i></i><i></i></span><span>${layout.label}</span></button>`).join('')}</div></div>
         <div class="strip-field"><span class="section-label" id="paper-label">Paper color</span><div class="paper-options" role="group" aria-labelledby="paper-label">${paperColors.map(paper => `<button type="button" class="paper-option" data-strip-color="${paper.color}" aria-label="${paper.label}" aria-pressed="${style.color === paper.color}"><span class="paper-swatch" data-paper="${paper.id}" aria-hidden="true"></span><span>${paper.label}</span></button>`).join('')}<label class="custom-paper">Custom<input type="color" id="strip-color" value="${style.color}" aria-label="Custom paper color"></label></div></div>
         <div class="strip-field"><label class="section-label" for="strip-caption">Caption</label><input class="text-input" id="strip-caption" maxlength="48" value="${escapeHtml(style.caption)}" placeholder="A few words to remember" aria-describedby="caption-help"><small id="caption-help">Up to 48 characters. Leave blank for just the photos.</small></div>
         <div class="strip-field-row"><div class="strip-field"><label class="section-label" for="strip-font">Lettering</label><select class="text-input" id="strip-font">${[['serif', 'Classic'], ['sans', 'Simple'], ['mono', 'Typewriter']].map(([value, label]) => `<option value="${value}" ${style.font === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
-        <div class="strip-field"><label class="section-label" for="strip-spacing">Spacing</label><select class="text-input" id="strip-spacing">${[['compact', 'Compact'], ['regular', 'Balanced'], ['wide', 'Airy']].map(([value, label]) => `<option value="${value}" ${style.spacing === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div>
+        <div class="strip-field"><label class="section-label" for="strip-spacing">Spacing</label><select class="text-input" id="strip-spacing">${[['compact', 'Compact'], ['regular', 'Balanced'], ['wide', 'Airy'], ['beside', 'Beside']].map(([value, label]) => `<option value="${value}" ${style.spacing === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div>
         <div class="strip-toggles"><label><input type="checkbox" id="strip-rounded" ${style.rounded ? 'checked' : ''}>Rounded photos</label><label><input type="checkbox" id="strip-date" ${style.showDate ? 'checked' : ''}>Show capture date (UTC)</label></div>
         <button class="text-action" type="button" data-action="reset-strip">Reset design</button>
       </fieldset>
@@ -148,7 +204,7 @@ function renderResult() {
 
 function updateStripPreview() {
   const image = document.querySelector('#photo-strip');
-  if (image) { image.src = state.strip; image.dataset.layout = state.stripStyle.layout; }
+  if (image) image.src = state.strip;
   const size = document.querySelector('#strip-size');
   if (size && state.stripCanvas) size.textContent = `${state.stripCanvas.width} × ${state.stripCanvas.height} px`;
 }
@@ -173,10 +229,6 @@ function changeStripStyle(patch, reset = false) {
   state.stripStyle = sanitizeStripStyle({ ...state.stripStyle, ...patch });
   if (state.stripPhotos) composeStrip(...state.stripPhotos);
   if (reset) renderResult();
-  document.querySelectorAll('[data-strip-layout]').forEach(button => {
-    const selected = button.dataset.stripLayout === state.stripStyle.layout;
-    button.classList.toggle('is-selected', selected); button.setAttribute('aria-pressed', String(selected));
-  });
   document.querySelectorAll('[data-strip-color]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.stripColor === state.stripStyle.color)));
   const color = document.querySelector('#strip-color'); if (color) color.value = state.stripStyle.color;
   clearTimeout(state.styleTimer); state.styleTimer = setTimeout(shareStripStyle, 150);
@@ -192,8 +244,55 @@ function showCurrentScreen(screen) {
 function attachVideo(id, stream) {
   const video = document.querySelector(`#${id}`);
   if (!video || !stream) return;
-  video.srcObject = stream;
-  document.querySelector(`#${id}-placeholder`)?.classList.add('is-hidden');
+  const placeholder = document.querySelector(`#${id}-placeholder`);
+  const status = (message, retry = false) => {
+    if (!video.isConnected || video.srcObject !== stream) return;
+    placeholder?.classList.remove('is-hidden');
+    const copy = placeholder?.querySelector('p'); if (copy) copy.textContent = message;
+    placeholder?.querySelector('button')?.classList.toggle('is-hidden', !retry);
+    updateConnectionState();
+  };
+  const showFrame = () => {
+    if (!video.isConnected || video.srcObject !== stream || video.paused || !video.videoWidth || video.readyState < 2) return;
+    placeholder?.classList.add('is-hidden'); updateConnectionState();
+  };
+  const confirmFrame = () => {
+    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(showFrame);
+    else showFrame();
+  };
+  const play = () => {
+    if (!video.isConnected || video.srcObject !== stream || !stream.getVideoTracks().some(track => track.readyState === 'live')) return;
+    video.play().then(confirmFrame).catch(error => {
+      if (error.name !== 'AbortError') status('Tap to show the live camera preview.', true);
+    });
+  };
+  video.muted = true; video.defaultMuted = true; video.playsInline = true; video.autoplay = true;
+  video.onloadedmetadata = play; video.oncanplay = play; video.onplaying = confirmFrame;
+  video.onpause = () => { if (!document.hidden) status('Camera preview paused. Tap to show it.', true); };
+  video.onwaiting = () => { if (video.readyState < 2) status('Waiting for the camera picture…'); };
+  video.onerror = () => status('The camera preview could not play. Try showing it again.', true);
+  if (video.srcObject !== stream) {
+    video.srcObject = stream;
+    status(id === 'remote-video' ? 'Connecting to your person…' : 'Starting your camera…');
+  }
+  play();
+}
+
+function resumeCameraPreviews() {
+  if (state.screen !== 'booth' && state.screen !== 'lobby') return;
+  attachVideo('local-video', state.stream); attachVideo('remote-video', state.remoteStream);
+}
+
+function updateAppearance() {
+  document.querySelectorAll('[data-filter], [data-mirror]').forEach(button => {
+    const selected = button.dataset.filter !== undefined ? button.dataset.filter === state.filter : button.dataset.mirror === String(state.mirror);
+    button.classList.toggle('is-selected', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  document.querySelectorAll('.camera-view[data-filter-style]').forEach(camera => {
+    camera.dataset.filterStyle = state.filter; camera.dataset.mirrored = String(state.mirror);
+  });
+  updateReady();
 }
 
 function updateConnectionState(value = null) {
@@ -206,9 +305,29 @@ function updateConnectionState(value = null) {
   element.textContent = label;
   element.classList.toggle('is-connected', channelOpen || peerState === 'connected');
   const button = document.querySelector('[data-action="ready"]');
-  if (button) button.disabled = !channelOpen;
+  if (button) {
+    const preview = document.querySelector('#local-video');
+    const cameraPlaying = preview && !preview.paused && preview.videoWidth > 0 && preview.readyState >= 2;
+    button.disabled = !channelOpen || !cameraPlaying || !state.clockSynced || state.remoteCaptureVersion !== CAPTURE_VERSION || state.captureRunning || state.captureStarting;
+    button.textContent = state.captureRunning ? 'Taking four photos…' : state.localReady ? 'You’re ready' : 'I’m ready';
+    button.setAttribute('aria-pressed', String(state.localReady));
+    button.classList.toggle('is-ready', state.localReady);
+  }
+  document.querySelectorAll('[data-filter], [data-mirror]').forEach(choice => { choice.disabled = state.captureRunning; });
   const message = document.querySelector('#ready-message');
-  if (message) message.textContent = readyMessage();
+  if (message && message.textContent !== readyMessage()) message.textContent = readyMessage();
+  for (const remote of [false, true]) {
+    const status = document.querySelector(`#${remote ? 'remote' : 'self'}-camera-status`);
+    if (!status) continue;
+    const video = document.querySelector(`#${remote ? 'remote' : 'local'}-video`);
+    const playing = Boolean(video && !video.paused && video.videoWidth > 0 && video.readyState >= 2);
+    const ready = remote ? state.remoteReady : state.localReady;
+    const captured = (remote ? state.otherPhotos : state.ownPhotos).filter(Boolean).length === CAPTURE_ROUNDS;
+    const copy = state.captureRunning ? captured ? 'Captured' : 'Posing' : playing ? ready ? 'Ready' : 'Camera on' : remote && !channelOpen ? label : 'Preview paused';
+    if (status.textContent !== copy) status.textContent = copy;
+    status.classList.toggle('is-ready', playing && ready || state.captureRunning && captured);
+  }
+  updateRoundTray();
 }
 
 async function getCamera() {
@@ -321,7 +440,10 @@ async function setupPeer(makeOffer = false) {
   state.remoteStream = new MediaStream();
   for (const track of state.stream.getTracks()) peer.addTrack(track, state.stream);
   peer.ontrack = event => {
-    for (const track of event.streams[0].getTracks()) state.remoteStream.addTrack(track);
+    if (state.peer !== peer) return;
+    for (const track of event.streams[0]?.getTracks() || [event.track]) {
+      if (!state.remoteStream.getTracks().some(existing => existing.id === track.id)) state.remoteStream.addTrack(track);
+    }
     attachVideo('remote-video', state.remoteStream);
   };
   peer.onicecandidate = event => { if (event.candidate) sendSignal('ice', event.candidate.toJSON()); };
@@ -342,24 +464,75 @@ async function setupPeer(makeOffer = false) {
 
 function bindPhotoChannel(channel) {
   state.channel = channel;
-  channel.onopen = () => { updateConnectionState(); if (state.screen === 'booth') renderBooth(); shareStripStyle(); updateStripShareStatus(); };
-  channel.onclose = () => { updateConnectionState('Disconnected'); updateStripShareStatus(); };
+  channel.onopen = () => {
+    if (state.channel !== channel) return;
+    channel.send(JSON.stringify({ type: 'booth-info', captureVersion: CAPTURE_VERSION }));
+    if (state.role === 'host') pingCaptureClock();
+    updateConnectionState(); shareStripStyle(); updateStripShareStatus();
+  };
+  channel.onclose = () => {
+    if (state.channel !== channel) return;
+    if (state.captureRunning) cancelCapture('connection', false);
+    updateConnectionState('Disconnected'); updateStripShareStatus();
+  };
   channel.onerror = () => toast('Photo connection interrupted. Try again.');
   channel.onmessage = event => {
+    if (state.channel !== channel) return;
     try {
       const message = JSON.parse(event.data);
+      if (message.type === 'booth-info') { state.remoteCaptureVersion = message.captureVersion; updateReady(); }
+      if (message.type === 'clock-ping' && state.role === 'guest' && Number.isFinite(message.at)) {
+        channel.send(JSON.stringify({ type: 'clock-pong', at: message.at, remoteAt: Date.now() }));
+      }
+      if (message.type === 'clock-pong' && state.role === 'host' && message.at === state.clockPingAt && Number.isFinite(message.remoteAt)) {
+        const receivedAt = Date.now(), rtt = receivedAt - message.at;
+        if (rtt >= 0 && rtt < state.clockBestRtt) { state.clockBestRtt = rtt; state.clockOffset = message.remoteAt - (message.at + receivedAt) / 2; }
+        state.clockSynced = true; state.clockSamples += 1; state.clockPingAt = null;
+        channel.send(JSON.stringify({ type: 'clock-sync' })); updateReady();
+        if (state.clockSamples < 3) pingCaptureClock();
+      }
+      if (message.type === 'clock-sync' && state.role === 'guest') { state.clockSynced = true; updateReady(); }
+      if (message.type === 'capture-settings' && !state.captureRunning && ['warm', 'mono', 'original'].includes(message.filter) && typeof message.mirror === 'boolean') {
+        state.filter = message.filter; state.mirror = message.mirror;
+        state.localReady = state.remoteReady = false;
+        if (state.screen === 'booth') updateAppearance();
+      }
+      if (message.type === 'capture-ready' && typeof message.ready === 'boolean' && !state.captureRunning && state.remoteCaptureVersion === CAPTURE_VERSION) {
+        state.remoteReady = message.ready; updateReady(); startCaptureWhenReady();
+      }
+      if (message.type === 'capture-start' && state.role === 'guest') scheduleCapture(message);
+      if (message.type === 'capture-cancel' && message.captureId === state.captureId && state.captureRunning) cancelCapture(message.reason, false);
       if (message.type === 'strip-style' && state.role === 'guest') {
         state.stripStyle = sanitizeStripStyle(message.style, state.stripStyle);
         if (state.stripPhotos) { composeStrip(...state.stripPhotos); renderResult(); }
       }
-      if (message.type === 'photo-start') state.photoParts = { total: message.total, chunks: new Array(message.total), count: 0 };
-      if (message.type === 'photo-chunk' && state.photoParts && message.total === state.photoParts.total) {
-        if (state.photoParts.chunks[message.index] === undefined) { state.photoParts.chunks[message.index] = message.data; state.photoParts.count += 1; }
-        if (state.photoParts.count === state.photoParts.total) { state.otherPhoto = state.photoParts.chunks.join(''); state.photoParts = null; tryCompose(); }
-      }
-      if (message.type === 'retake') { clearStripCapture(); state.localReady = state.remoteReady = false; if (state.screen === 'result') showCurrentScreen('booth'); updateConnectionState(); }
+      if (message.type === 'photo-start' || message.type === 'photo-chunk') receivePhotoPart(message);
+      if (message.type === 'retake' && message.captureId === state.captureId) { clearStripCapture(); state.localReady = state.remoteReady = false; if (state.screen === 'result' || state.screen === 'booth') showCurrentScreen('booth'); updateConnectionState(); }
     } catch { toast('Could not read that photo. Try taking the moment again.'); }
   };
+}
+
+function pingCaptureClock() {
+  if (state.channel?.readyState !== 'open') return;
+  state.clockPingAt = Date.now();
+  state.channel.send(JSON.stringify({ type: 'clock-ping', at: state.clockPingAt }));
+}
+
+function receivePhotoPart(message) {
+  if (!state.captureRunning || message.captureId !== state.captureId || !Number.isInteger(message.round) || message.round < 0 || message.round >= CAPTURE_ROUNDS) return;
+  if (!Number.isInteger(message.total) || message.total < 1 || message.total > 128 || state.otherPhotos[message.round]) return;
+  if (message.type === 'photo-start') {
+    if (!state.photoParts.has(message.round)) state.photoParts.set(message.round, { total: message.total, chunks: new Array(message.total), count: 0 });
+    return;
+  }
+  const parts = state.photoParts.get(message.round);
+  if (!parts || message.total !== parts.total || !Number.isInteger(message.index) || message.index < 0 || message.index >= parts.total || typeof message.data !== 'string' || message.data.length > PHOTO_CHUNK_SIZE) return;
+  if (parts.chunks[message.index] === undefined) { parts.chunks[message.index] = message.data; parts.count += 1; }
+  if (parts.count === parts.total) {
+    const photo = parts.chunks.join(''); state.photoParts.delete(message.round);
+    if (!photo.startsWith('data:image/jpeg;base64,')) { cancelCapture('camera'); return; }
+    state.otherPhotos[message.round] = photo; updateReady(); tryCompose();
+  }
 }
 
 async function startOffer() {
@@ -385,69 +558,80 @@ async function handleSignal(signal) {
     for (const candidate of state.candidates.splice(0)) await state.peer.addIceCandidate(candidate);
   } else if (signal.kind === 'ice' && state.peer) {
     if (state.peer.remoteDescription) await state.peer.addIceCandidate(signal.payload); else state.candidates.push(signal.payload);
-  } else if (signal.kind === 'ready') { state.remoteReady = true; updateReady(); await startCaptureWhenReady(); }
-  else if (signal.kind === 'unready') { state.remoteReady = false; updateReady(); }
-  else if (signal.kind === 'settings') {
+  } else if (signal.kind === 'settings' && !state.captureRunning) {
     if (['warm', 'mono', 'original'].includes(signal.payload?.filter)) state.filter = signal.payload.filter;
     if (typeof signal.payload?.mirror === 'boolean') state.mirror = signal.payload.mirror;
-    if (state.screen === 'booth') renderBooth();
+    if (state.screen === 'booth') updateAppearance();
   }
-  else if (signal.kind === 'capture-at') scheduleCapture(signal.payload.at);
-  else if (signal.kind === 'capture-cancel') { clearTimeout(state.captureTimer); state.localReady = false; updateReady(); }
+  else if (signal.kind === 'capture-at') toast('This booth has been updated. Refresh both pages to take four rounds.');
 }
 
 function updateReady() {
-  const button = document.querySelector('[data-action="ready"]');
-  if (button) { button.textContent = state.localReady ? 'You’re ready ✓' : 'I’m ready'; button.disabled = state.channel?.readyState !== 'open'; }
   updateConnectionState();
 }
 
 function changeAppearance(key, rawValue) {
+  if (state.captureRunning || state.captureStarting) return;
   const value = key === 'mirror' ? rawValue === 'true' : rawValue;
   state[key] = value; state.localReady = false; state.remoteReady = false;
-  const selector = key === 'filter' ? '[data-filter]' : '[data-mirror]';
-  document.querySelectorAll(selector).forEach(button => {
-    const selected = button.dataset[key] === String(rawValue);
-    button.classList.toggle('is-selected', selected);
-  });
-  document.querySelectorAll('.camera-view[data-filter-style]').forEach(camera => {
-    camera.dataset.filterStyle = state.filter;
-    camera.dataset.mirrored = String(state.mirror);
-  });
-  sendSignal('settings', { filter: state.filter, mirror: state.mirror }); sendSignal('unready', {}); updateReady();
+  updateAppearance();
+  if (state.channel?.readyState === 'open') state.channel.send(JSON.stringify({ type: 'capture-settings', filter: state.filter, mirror: state.mirror }));
+  else sendSignal('settings', { filter: state.filter, mirror: state.mirror });
+  updateReady();
 }
 
 async function toggleReady() {
+  if (state.captureRunning || state.captureStarting || !state.clockSynced || state.remoteCaptureVersion !== CAPTURE_VERSION || state.channel?.readyState !== 'open') return;
   state.localReady = !state.localReady;
-  await sendSignal(state.localReady ? 'ready' : 'unready', {}); updateReady();
+  state.channel.send(JSON.stringify({ type: 'capture-ready', ready: state.localReady })); updateReady();
   await startCaptureWhenReady();
 }
 
 async function startCaptureWhenReady() {
-  if (state.localReady && state.remoteReady && state.role === 'host' && !state.captureStarting) {
+  if (state.localReady && state.remoteReady && state.role === 'host' && !state.captureStarting && !state.captureRunning && state.clockSynced && state.remoteCaptureVersion === CAPTURE_VERSION && state.channel?.readyState === 'open') {
     state.captureStarting = true;
-    const captureAt = Date.now() + 3200;
-    try { await sendSignal('capture-at', { at: captureAt }); if (state.peer) scheduleCapture(captureAt); }
+    const plan = { type: 'capture-start', captureId: crypto.randomUUID(), at: Date.now() + ROUND_INTERVAL_MS, offset: state.clockOffset };
+    try { scheduleCapture(plan); state.channel.send(JSON.stringify(plan)); }
+    catch { cancelCapture('connection'); }
     finally { state.captureStarting = false; }
   }
 }
 
-function scheduleCapture(at) {
-  state.captureAt = at;
-  clearTimeout(state.captureTimer); state.localReady = state.remoteReady = false; updateReady();
-  const label = document.querySelector('#countdown');
+function scheduleCapture(plan) {
+  if (state.captureRunning || state.captureId === plan.captureId || state.screen !== 'booth') return;
+  if (!state.localReady || !state.remoteReady) return;
+  if (typeof plan.captureId !== 'string' || plan.captureId.length > 64 || !plan.captureId.length || !Number.isFinite(plan.at) || !Number.isFinite(plan.offset) || !state.clockSynced || state.remoteCaptureVersion !== CAPTURE_VERSION) return;
+  const localAt = plan.at + (state.role === 'guest' ? plan.offset : 0);
+  if (localAt - Date.now() < -1000 || localAt - Date.now() > 10000) {
+    state.channel?.send(JSON.stringify({ type: 'capture-cancel', captureId: plan.captureId, reason: 'timeout' }));
+    toast('The countdown arrived too late. Both people can press “I’m ready” to try again.'); return;
+  }
+  clearStripCapture(); state.captureAt = plan.at; state.captureId = plan.captureId;
+  state.captureRunning = true; state.captureAbort = new AbortController();
+  state.ownPhotos = new Array(CAPTURE_ROUNDS).fill(null); state.otherPhotos = new Array(CAPTURE_ROUNDS).fill(null);
+  state.localReady = state.remoteReady = false; updateReady();
+  state.captureDeadlineTimer = setTimeout(() => cancelCapture('timeout'), Math.max(0, localAt - Date.now()) + (CAPTURE_ROUNDS - 1) * ROUND_INTERVAL_MS + 30000);
   const tick = () => {
-    const remaining = at - Date.now();
-    if (remaining <= 0) { if (label) label.textContent = 'Smile'; capturePhoto(); return; }
-    if (label) label.textContent = String(Math.ceil(remaining / 1000));
+    if (state.captureId !== plan.captureId || !state.captureRunning) return;
+    const remaining = localAt + state.captureRound * ROUND_INTERVAL_MS - Date.now();
+    const label = document.querySelector('#countdown');
+    if (remaining <= 0) {
+      if (remaining < -1000 || document.hidden) { cancelCapture('hidden'); return; }
+      const round = state.captureRound;
+      try { if (!capturePhoto(round)) return; } catch { cancelCapture('camera'); return; }
+      state.captureRound += 1; updateReady();
+      if (state.captureRound === CAPTURE_ROUNDS) { if (label) label.textContent = 'Four rounds captured'; return; }
+      state.captureTimer = setTimeout(tick, 200); return;
+    }
+    if (label) label.textContent = `Photo ${state.captureRound + 1} of ${CAPTURE_ROUNDS} · ${Math.ceil(remaining / 1000)}`;
     state.captureTimer = setTimeout(tick, Math.min(180, remaining));
   };
   tick();
 }
 
-function capturePhoto() {
+function capturePhoto(round) {
   const video = document.querySelector('#local-video');
-  if (!video || video.readyState < 2 || !video.videoWidth) { toast('Your camera is not ready. Try again.'); return; }
+  if (!video || video.paused || video.ended || video.readyState < 2 || !video.videoWidth || !state.stream?.active || state.channel?.readyState !== 'open') { cancelCapture('camera'); return false; }
   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 900;
   const context = canvas.getContext('2d');
   context.filter = state.filter === 'mono' ? 'grayscale(1)' : state.filter === 'warm' ? 'sepia(.17) saturate(1.12)' : 'none';
@@ -455,38 +639,79 @@ function capturePhoto() {
   if (state.mirror) { context.translate(canvas.width, 0); context.scale(-1, 1); }
   context.drawImage(video, (video.videoWidth - side) / 2, (video.videoHeight - side) / 2, side, side, 0, 0, 900, 900);
   context.setTransform(1, 0, 0, 1, 0, 0);
-  state.ownPhoto = canvas.toDataURL('image/jpeg', .78);
-  if (state.channel?.readyState === 'open') {
-    const size = 20_000, count = Math.ceil(state.ownPhoto.length / size);
-    state.channel.send(JSON.stringify({ type: 'photo-start', total: count }));
-    for (let index = 0; index < count; index++) state.channel.send(JSON.stringify({ type: 'photo-chunk', index, total: count, data: state.ownPhoto.slice(index * size, (index + 1) * size) }));
-  }
-  const label = document.querySelector('#countdown'); if (label) label.textContent = 'Sent';
-  tryCompose();
+  const photo = canvas.toDataURL('image/jpeg', .78), captureId = state.captureId, signal = state.captureAbort.signal;
+  state.ownPhotos[round] = photo;
+  updateRoundTray();
+  state.photoSendQueue = state.photoSendQueue.catch(() => {}).then(async () => {
+    if (signal.aborted || state.captureId !== captureId) return;
+    const channel = state.channel, total = Math.ceil(photo.length / PHOTO_CHUNK_SIZE);
+    const send = payload => {
+      if (signal.aborted || state.captureId !== captureId || channel.readyState !== 'open') throw new Error('Photo transfer stopped.');
+      channel.send(JSON.stringify({ ...payload, captureId, round, total }));
+    };
+    await waitForPhotoBuffer(channel, signal, 128000);
+    send({ type: 'photo-start' });
+    for (let index = 0; index < total; index++) {
+      await waitForPhotoBuffer(channel, signal, 128000);
+      send({ type: 'photo-chunk', index, data: photo.slice(index * PHOTO_CHUNK_SIZE, (index + 1) * PHOTO_CHUNK_SIZE) });
+    }
+    await waitForPhotoBuffer(channel, signal, 0);
+    if (state.captureId === captureId) { state.sentRounds.add(round); updateReady(); tryCompose(); }
+  }).catch(() => { if (!signal.aborted && state.captureId === captureId) cancelCapture('connection'); });
+  return true;
 }
 
-function tryCompose() {
-  if (!state.ownPhoto || !state.otherPhoto) return;
-  const own = state.ownPhoto, other = state.otherPhoto;
-  const local = new Image(), remote = new Image(); let ready = 0;
-  const onload = () => {
-    if (++ready === 2 && state.ownPhoto === own && state.otherPhoto === other) {
-      state.stripPhotos = [local, remote]; composeStrip(local, remote);
-    }
-  };
-  local.onerror = remote.onerror = () => toast('Could not prepare this strip. Please take another photo.');
-  local.onload = remote.onload = onload; local.src = own; remote.src = other;
+function waitForPhotoBuffer(channel, signal, limit) {
+  if (signal.aborted || channel?.readyState !== 'open') return Promise.reject(new Error('Photo connection closed.'));
+  if (channel.bufferedAmount <= limit) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    channel.bufferedAmountLowThreshold = limit;
+    const finish = error => { clearTimeout(timer); channel.removeEventListener('bufferedamountlow', low); channel.removeEventListener('close', closed); signal.removeEventListener('abort', closed); error ? reject(error) : resolve(); };
+    const low = () => { if (channel.bufferedAmount <= limit) finish(); };
+    const closed = () => finish(new Error('Photo transfer stopped.'));
+    const timer = setTimeout(closed, 15000);
+    channel.addEventListener('bufferedamountlow', low); channel.addEventListener('close', closed); signal.addEventListener('abort', closed, { once: true });
+    low();
+  });
+}
+
+async function tryCompose() {
+  if (!state.captureRunning || state.composing || state.sentRounds.size !== CAPTURE_ROUNDS || state.ownPhotos.filter(Boolean).length !== CAPTURE_ROUNDS || state.otherPhotos.filter(Boolean).length !== CAPTURE_ROUNDS) return;
+  state.composing = true; const captureId = state.captureId;
+  const decode = src => new Promise((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = reject; image.src = src; });
+  try {
+    const [local, remote] = await Promise.all([Promise.all(state.ownPhotos.map(decode)), Promise.all(state.otherPhotos.map(decode))]);
+    if (state.captureId !== captureId) return;
+    clearTimeout(state.captureDeadlineTimer); clearTimeout(state.captureTimer);
+    state.captureRunning = false; state.stripPhotos = [local, remote]; composeStrip(local, remote);
+  } catch { if (state.captureId === captureId) cancelCapture('camera'); }
+  finally { if (state.captureId === captureId) state.composing = false; }
 }
 
 function composeStrip(local, remote) {
-  const photos = state.role === 'host' ? [local, remote] : [remote, local];
+  const host = state.role === 'host' ? local : remote, guest = state.role === 'host' ? remote : local;
+  const photos = host.flatMap((photo, round) => [photo, guest[round]]);
   state.stripCanvas = renderStrip(document.createElement('canvas'), photos, state.stripStyle, state.captureAt);
   state.strip = state.stripCanvas.toDataURL('image/jpeg', .91);
   if (state.screen === 'result') updateStripPreview(); else showCurrentScreen('result');
 }
 
 function clearStripCapture() {
-  state.ownPhoto = state.otherPhoto = state.strip = state.photoParts = state.stripPhotos = state.stripCanvas = state.captureAt = null;
+  clearTimeout(state.captureTimer); clearTimeout(state.captureDeadlineTimer); state.captureAbort?.abort();
+  state.ownPhotos = []; state.otherPhotos = []; state.photoParts = new Map(); state.sentRounds = new Set();
+  state.strip = state.stripPhotos = state.stripCanvas = state.captureAt = state.captureId = state.captureAbort = null;
+  state.captureRunning = state.composing = false; state.captureRound = 0;
+}
+
+function cancelCapture(reason, notify = true) {
+  if (notify && state.channel?.readyState === 'open' && state.captureId) {
+    try { state.channel.send(JSON.stringify({ type: 'capture-cancel', captureId: state.captureId, reason })); } catch { /* Clear the local take even when the connection has closed. */ }
+  }
+  clearStripCapture(); state.localReady = state.remoteReady = false;
+  const label = document.querySelector('#countdown'); if (label) label.textContent = '';
+  updateReady();
+  const messages = { hidden: 'Keep both booth pages visible during all four countdowns. Press “I’m ready” to try again.', camera: 'A camera could not capture all four photos. Check both previews and try again.', timeout: 'The photo exchange took too long. Both people can press “I’m ready” to try again.' };
+  toast(messages[reason] || 'The photo connection was interrupted. Reconnect and take all four rounds again.');
 }
 
 function resetPeerConnection() {
@@ -495,6 +720,9 @@ function resetPeerConnection() {
   state.peer = state.channel = state.remoteStream = null;
   state.peerId = null; state.peerName = 'Your person'; state.offerStarted = false; state.candidates = [];
   state.turnAvailable = false; state.iceFailureNotified = false;
+  state.remoteCaptureVersion = null; state.clockSynced = false; state.clockOffset = 0;
+  state.clockSamples = 0; state.clockBestRtt = Infinity; state.clockPingAt = null;
+  state.captureStarting = false;
   clearStripCapture();
   state.localReady = state.remoteReady = false;
 }
@@ -538,20 +766,23 @@ function leaveLocal(clearStored = true) {
   clearStripCapture();
   state.roomId = state.invite = state.participantId = state.role = state.peerId = null;
   state.turnAvailable = false; state.iceFailureNotified = false;
+  state.remoteCaptureVersion = null; state.clockSynced = false; state.clockOffset = 0;
+  state.clockSamples = 0; state.clockBestRtt = Infinity; state.clockPingAt = null;
+  state.captureStarting = false;
   if (clearStored) { sessionStorage.removeItem('momentstamp-host'); sessionStorage.removeItem('momentstamp-session'); }
 }
 
 app.addEventListener('click', async event => {
   if (event.target.classList.contains('dialog-backdrop')) { document.querySelector('.dialog-backdrop')?.remove(); return; }
-  const target = event.target.closest('[data-action], [data-filter], [data-mirror], [data-strip-layout], [data-strip-color]');
+  const target = event.target.closest('[data-action], [data-filter], [data-mirror], [data-strip-color]');
   if (!target) return;
-  if (target.dataset.stripLayout) return changeStripStyle({ layout: target.dataset.stripLayout });
   if (target.dataset.stripColor) return changeStripStyle({ color: target.dataset.stripColor });
   if (target.dataset.filter) return changeAppearance('filter', target.dataset.filter);
   if (target.dataset.mirror !== undefined) return changeAppearance('mirror', target.dataset.mirror);
   const action = target.dataset.action;
   try {
     if (action === 'show-create') openCreateDialog();
+    else if (action === 'resume-preview') resumeCameraPreviews();
     else if (action === 'dismiss-dialog') document.querySelector('.dialog-backdrop')?.remove();
     else if (action === 'show-join') { document.querySelector('#invite-form')?.classList.toggle('is-hidden'); document.querySelector('#invite-url')?.focus(); }
     else if (action === 'copy-invite') { await navigator.clipboard.writeText(`${location.origin}/?room=${state.roomId}&invite=${state.invite}`); toast('Invite copied. Send it to your person.'); }
@@ -566,7 +797,7 @@ app.addEventListener('click', async event => {
       const link = document.createElement('a'); link.href = state.stripCanvas.toDataURL(`image/${state.exportFormat}`, .94);
       link.download = `momentstamp-${state.stripStyle.layout}-${new Date(state.captureAt || Date.now()).toISOString().slice(0, 10)}.${state.exportFormat === 'png' ? 'png' : 'jpg'}`; link.click();
     }
-    else if (action === 'retake') { shareStripStyle(); clearStripCapture(); state.localReady = state.remoteReady = false; if (state.channel?.readyState === 'open') state.channel.send(JSON.stringify({ type: 'retake' })); showCurrentScreen('booth'); }
+    else if (action === 'retake') { const captureId = state.captureId; shareStripStyle(); clearStripCapture(); state.localReady = state.remoteReady = false; if (state.channel?.readyState === 'open') state.channel.send(JSON.stringify({ type: 'retake', captureId })); showCurrentScreen('booth'); }
     else if (action === 'finish') await closeBooth();
   } catch (error) { toast(error.message || 'Please try that again.'); }
 });
@@ -591,6 +822,13 @@ app.addEventListener('submit', async event => {
   else if (event.target.id === 'guest-form') await requestToJoin(event.target);
   else if (event.target.id === 'invite-form') navigateToInvite(event.target.elements['invite-url'].value);
 });
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state.captureRunning && state.captureRound < CAPTURE_ROUNDS) cancelCapture('hidden');
+  else if (!document.hidden) resumeCameraPreviews();
+});
+
+window.addEventListener('focus', resumeCameraPreviews);
 
 app.addEventListener('keydown', event => {
   if (event.key === 'Escape') document.querySelector('.dialog-backdrop')?.remove();

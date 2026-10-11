@@ -1,14 +1,15 @@
 # Momentstamp
 
-A private browser photobooth for two people in different places. The host can have up to six people waiting, then admit one guest into the booth. Both participants take portraits together and create the same downloadable photo strip in their own browsers.
+A private browser photobooth for two people in different places. The host can have up to six people waiting, then admit one guest into the booth. Both participants take four synchronized rounds and create the same eight-photo strip in their own browsers, with both people side by side in each row.
 
 ## Features
 
 - No account; the host shares an expiring invite link and approves guest requests.
 - A waiting list for up to six guests; one guest can be in the booth with the host at a time.
-- Live camera previews, soft warm / black-and-white / natural filters, and a mirror option.
-- Three strip layouts with paper colors, captions, lettering, spacing, rounded photos, and an optional date. The host styles the result and both people see the changes; either can download JPG or PNG.
-- Synchronized countdown and peer-to-peer photo exchange. Images are composed and downloaded locally; Momentstamp does not store photo files.
+- Live camera previews, soft warm / black-and-white / natural filters, and a mirror option. Preview elements stay attached while settings change; paused or blocked playback offers a “Show camera” button.
+- Participant camera cards show connection and readiness states. A four-round tray displays paired thumbnails as photos arrive, with the host on the left in each pair.
+- One eight-photo strip with four rows of paired portraits, warm paper, slim borders, and a small booth stamp. Paper colors, captions, lettering, four spacing options, rounded photos, and an optional date. Thin gaps separate people, with wider gaps between rounds. “Beside” joins the two photos with no center gap or border; rounding applies to the outside of each joined row. The paper height fits the photos and footer. The host styles the result and both people see the changes; either can download JPG or PNG.
+- Both people press “I’m ready” once to start four synchronized countdowns. Photos are exchanged directly between browsers, composed and downloaded locally; Momentstamp does not store photo files.
 - No voice chat. The product is intended for people aged 16 and older, with self-confirmation at entry.
 
 ## How it works
@@ -54,4 +55,4 @@ Read the [Privacy Policy](public/privacy.html) and [Terms of Use](public/terms.h
 - The app uses HTTP polling for room events and WebRTC for live previews and photo transfer.
 - Connection success depends on browser and network support. TURN improves connectivity on restrictive networks but does not guarantee every connection.
 - Age confirmation is self-reported, not verified.
-- The home page loads sample photos from Unsplash.
+- Both people need to keep the booth visible during the four countdowns. An interrupted take can be restarted using “I’m ready”.

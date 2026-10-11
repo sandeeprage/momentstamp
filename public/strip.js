@@ -1,11 +1,16 @@
-export const stripLayouts = [
-  { id: 'classic', label: 'Classic strip', width: 850, height: 1830 },
-  { id: 'duo', label: 'Side by side', width: 1640, height: 1030 },
-  { id: 'square', label: 'Square', width: 1200, height: 1200 },
-];
+export const CAPTURE_ROUNDS = 4;
+
+const STRIP_WIDTH = 1200;
+
+const spacingPresets = {
+  compact: { margin: 24, columnGap: 8, rowGap: 28 },
+  regular: { margin: 32, columnGap: 12, rowGap: 44 },
+  wide: { margin: 40, columnGap: 20, rowGap: 64 },
+  beside: { margin: 32, columnGap: 0, rowGap: 44 },
+};
 
 export const paperColors = [
-  { id: 'paper', label: 'Paper', color: '#fbfcfc' },
+  { id: 'paper', label: 'Paper', color: '#f8f3e8' },
   { id: 'rose', label: 'Rose', color: '#f3d6d2' },
   { id: 'sage', label: 'Sage', color: '#dce7da' },
   { id: 'sky', label: 'Sky', color: '#dce7f3' },
@@ -13,37 +18,39 @@ export const paperColors = [
 ];
 
 export const defaultStripStyle = () => ({
-  layout: 'classic', color: '#fbfcfc', caption: 'even from here',
-  font: 'serif', spacing: 'regular', rounded: false, showDate: false,
+  color: '#f8f3e8', caption: '',
+  font: 'mono', spacing: 'regular', rounded: false, showDate: false,
 });
 
 export function sanitizeStripStyle(input, fallback = defaultStripStyle()) {
   const value = input && typeof input === 'object' ? input : {};
   return {
-    layout: stripLayouts.some(layout => layout.id === value.layout) ? value.layout : fallback.layout,
     color: typeof value.color === 'string' && /^#[0-9a-f]{6}$/i.test(value.color) ? value.color.toLowerCase() : fallback.color,
     caption: typeof value.caption === 'string' ? value.caption.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 48) : fallback.caption,
     font: ['sans', 'serif', 'mono'].includes(value.font) ? value.font : fallback.font,
-    spacing: ['compact', 'regular', 'wide'].includes(value.spacing) ? value.spacing : fallback.spacing,
+    spacing: ['compact', 'regular', 'wide', 'beside'].includes(value.spacing) ? value.spacing : fallback.spacing,
     rounded: typeof value.rounded === 'boolean' ? value.rounded : fallback.rounded,
     showDate: typeof value.showDate === 'boolean' ? value.showDate : fallback.showDate,
   };
 }
 
 export function stripGeometry(style) {
-  const layout = stripLayouts.find(item => item.id === style.layout) || stripLayouts[0];
-  const { width, height } = layout;
-  const scale = Math.min(width, height) / 850;
-  const margin = ({ compact: 32, regular: 62, wide: 90 }[style.spacing] || 62) * scale;
-  const gap = margin / 2;
-  const vertical = layout.id === 'classic';
-  const size = vertical ? width - 2 * margin : (width - 2 * margin - gap) / 2;
-  const top = layout.id === 'square' ? (height - size) / 2 - 60 : 100;
-  const photos = vertical
-    ? [{ x: margin, y: top, size }, { x: margin, y: top + size + gap, size }]
-    : [{ x: margin, y: top, size }, { x: margin + size + gap, y: top, size }];
-  const bottom = photos[1].y + size;
-  return { width, height, photos, headerY: top - 38, footerY: bottom + (height - bottom) * .38, scale };
+  const width = STRIP_WIDTH;
+  const scale = width / 1200;
+  const preset = spacingPresets[style.spacing] || spacingPresets.regular;
+  const margin = preset.margin * scale;
+  const columnGap = preset.columnGap * scale;
+  const rowGap = preset.rowGap * scale;
+  const size = (width - 2 * margin - columnGap) / 2;
+  const top = margin;
+  const photos = Array.from({ length: CAPTURE_ROUNDS * 2 }, (_, index) => ({
+    x: margin + (index % 2) * (size + columnGap),
+    y: top + Math.floor(index / 2) * (size + rowGap),
+    size,
+  }));
+  const bottom = photos.at(-1).y + size;
+  const height = Math.ceil(bottom + 144 * scale);
+  return { width, height, photos, footerY: bottom + 50 * scale, columnGap, rowGap, scale };
 }
 
 export function stripInk(color) {
@@ -55,39 +62,46 @@ export function stripInk(color) {
 }
 
 export function renderStrip(canvas, photos, input, capturedAt) {
+  if (!Array.isArray(photos) || photos.length !== CAPTURE_ROUNDS * 2) throw new Error('A strip needs four photos from each person.');
   const style = sanitizeStripStyle(input);
   const geometry = stripGeometry(style);
-  const { width, height, scale, headerY, footerY } = geometry;
+  const { width, height, scale, footerY } = geometry;
   canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = style.color; ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = stripInk(style.color); ctx.textAlign = 'center';
-  ctx.font = '500 24px monospace';
-  ctx.fillText('A MOMENT, MADE TOGETHER', width / 2, headerY, width - 64);
   geometry.photos.forEach(({ x, y, size }, index) => {
     const image = photos[index];
     const crop = Math.min(image.width, image.height);
+    const joined = style.spacing === 'beside';
+    const left = joined ? geometry.photos[index - index % 2].x : x;
+    const right = left + (joined ? size * 2 : size);
     ctx.save();
     if (style.rounded) {
-      const radius = size * .045;
+      const radius = size * .018;
       ctx.beginPath();
-      ctx.moveTo(x + radius, y);
-      ctx.arcTo(x + size, y, x + size, y + size, radius);
-      ctx.arcTo(x + size, y + size, x, y + size, radius);
-      ctx.arcTo(x, y + size, x, y, radius);
-      ctx.arcTo(x, y, x + size, y, radius);
+      ctx.moveTo(left + radius, y);
+      ctx.arcTo(right, y, right, y + size, radius);
+      ctx.arcTo(right, y + size, left, y + size, radius);
+      ctx.arcTo(left, y + size, left, y, radius);
+      ctx.arcTo(left, y, right, y, radius);
       ctx.closePath(); ctx.clip();
     }
     ctx.drawImage(image, (image.width - crop) / 2, (image.height - crop) / 2, crop, crop, x, y, size, size);
+    if (!joined || index % 2 === 1) {
+      ctx.strokeStyle = 'rgba(0, 0, 0, .16)'; ctx.lineWidth = scale;
+      ctx.strokeRect(left + scale / 2, y + scale / 2, right - left - scale, size - scale);
+    }
     ctx.restore();
   });
+  ctx.fillStyle = stripInk(style.color); ctx.textAlign = 'center';
   const fonts = { sans: 'Arial, sans-serif', serif: 'Georgia, serif', mono: 'monospace' };
-  ctx.font = `${style.font === 'serif' ? 'italic ' : ''}${Math.round(34 * scale)}px ${fonts[style.font]}`;
+  ctx.font = `${style.font === 'serif' ? 'italic ' : ''}${Math.round(26 * scale)}px ${fonts[style.font]}`;
   ctx.fillText(style.caption, width / 2, footerY, width - 100);
   if (style.showDate && Number.isFinite(capturedAt) && Math.abs(capturedAt) <= 8.64e15) {
     ctx.font = `${Math.round(17 * scale)}px monospace`;
-    ctx.fillText(new Date(capturedAt).toISOString().slice(0, 10), width / 2, footerY + 34 * scale);
+    ctx.fillText(new Date(capturedAt).toISOString().slice(0, 10), width / 2, footerY + (style.caption ? 30 * scale : 0));
   }
-  ctx.font = '17px monospace'; ctx.fillText('momentstamp', width / 2, height - 28);
+  ctx.font = `${Math.round(16 * scale)}px monospace`;
+  ctx.fillText('MOMENTSTAMP', width / 2, height - 28 * scale);
   return canvas;
 }
